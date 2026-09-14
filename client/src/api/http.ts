@@ -1,7 +1,17 @@
 import axios from 'axios'
 
+/**
+ * Relative `/api` by default. In development Vite proxies it; on Netlify a
+ * redirect rule in netlify.toml proxies it to the Render backend. Keeping it
+ * same-origin means no CORS preflights and the service worker's `/api/...`
+ * cache rules keep matching.
+ *
+ * Set VITE_API_URL (e.g. https://calidad-tthd.onrender.com/api) to call the
+ * backend directly instead — then CORS_ORIGIN on the server must list the
+ * frontend's origin.
+ */
 export const http = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 15_000,
 })
 

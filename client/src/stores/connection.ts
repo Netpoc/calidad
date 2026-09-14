@@ -40,6 +40,30 @@ export const useConnectionStore = defineStore('connection', () => {
     return apiReachable.value
   }
 
+  /**
+   * The API on Render's free tier sleeps after idle and takes 20–50 s to wake,
+   * far longer than the 4 s probe. Without this, staff opening the app in the
+   * morning see "Offline" on a phone with full signal and the first bookings
+   * go to the outbox. So on startup one long-patience request is fired in the
+   * background; when the server answers, the badge flips to Online and the
+   * outbox drains. The short probe stays short, because a real dead connection
+   * must still be detected quickly.
+   */
+  let warming = false
+  async function warmUp(): Promise<void> {
+    if (warming || apiReachable.value || !navigator.onLine) return
+    warming = true
+    try {
+      await http.get('/health', { timeout: 60_000 })
+      apiReachable.value = true
+      void sync()
+    } catch {
+      // Still unreachable after a minute — the periodic probe takes over.
+    } finally {
+      warming = false
+    }
+  }
+
   async function sync(): Promise<SyncResult[]> {
     if (!(await probe())) return []
     syncing.value = true
@@ -57,6 +81,7 @@ export const useConnectionStore = defineStore('connection', () => {
     const onOnline = () => {
       browserOnline.value = true
       void sync()
+      void warmUp()
     }
     const onOffline = () => {
       browserOnline.value = false
@@ -65,7 +90,10 @@ export const useConnectionStore = defineStore('connection', () => {
     window.addEventListener('online', onOnline)
     window.addEventListener('offline', onOffline)
     void refreshQueueCount()
-    void probe()
+    // Quick probe for an honest first badge, then the patient wake-up call.
+    void probe().then((ok) => {
+      if (!ok) void warmUp()
+    })
 
     return () => {
       window.removeEventListener('online', onOnline)
@@ -82,6 +110,7 @@ export const useConnectionStore = defineStore('connection', () => {
     syncing,
     lastSyncAt,
     probe,
+    warmUp,
     sync,
     watch,
     refreshQueueCount,

@@ -1,0 +1,47 @@
+# Netlify deploys the client only; the API lives on Render.
+#
+# Build runs from the repo root so npm workspaces resolve correctly — building
+# from `client/` alone makes npm hunt upward for the workspace root, which is
+# unreliable on CI.
+
+[build]
+  command = "npm run build --workspace client"
+  publish = "client/dist"
+
+[build.environment]
+  # Vite 7 needs Node 20.19+ / 22.12+.
+  NODE_VERSION = "22"
+  # The root install pulls in server devDependencies too. mongodb-memory-server
+  # would otherwise download a ~100 MB MongoDB binary on postinstall, which the
+  # frontend build never uses.
+  MONGOMS_DISABLE_POSTINSTALL = "1"
+
+# --- Redirects are evaluated in order; first match wins. ---
+
+# Proxy the API to Render. Because the browser sees a same-origin `/api`, there
+# are no CORS preflights, and the service worker's runtime-cache rules for
+# `/api/pricing` etc. keep matching. Swap the host here if the backend moves.
+[[redirects]]
+  from = "/api/*"
+  to = "https://calidad-tthd.onrender.com/api/:splat"
+  status = 200
+
+# SPA fallback: Vue Router uses history mode, so a refresh on /bookings must
+# serve index.html rather than a Netlify 404. Must come after the API rule.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    # The service worker must never be served stale, or users get stuck on an
+    # old app version until the browser decides to revalidate it.
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    # Vite fingerprints these, so they are safe to cache forever.
+    Cache-Control = "public, max-age=31536000, immutable"

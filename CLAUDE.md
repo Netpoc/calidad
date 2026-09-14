@@ -24,6 +24,16 @@ Vite proxies `/api` to `:4000` in development, so the client needs no API base U
 
 Single test: `npm test --workspace server -- <pattern>` (vitest passes the pattern through).
 
+## Deployment
+
+**Frontend on Netlify, API on Render** (`https://calidad-tthd.onrender.com`). [netlify.toml](netlify.toml) builds from the repo root (`npm run build --workspace client`, publish `client/dist`) and proxies `/api/*` to Render, so the app stays same-origin — no CORS, and the service worker's `/api/...` cache rules keep matching. The SPA fallback rule must stay *after* the API rule. `MONGOMS_DISABLE_POSTINSTALL=1` there stops the root install downloading a MongoDB binary the frontend build never uses.
+
+The API base is `import.meta.env.VITE_API_URL || '/api'` ([http.ts](client/src/api/http.ts)); the dev proxy target is `VITE_DEV_PROXY_TARGET || 'http://localhost:4000'` ([vite.config.ts](client/vite.config.ts)). Both default local — **never default the dev proxy to Render**, or `npm run dev` writes into production data. See [client/.env.example](client/.env.example).
+
+**Render's free tier sleeps after ~15 min idle and takes 20–50 s to wake.** The 4 s reachability probe would report Offline during that window, so [connection.ts](client/src/stores/connection.ts) `warmUp()` fires one 60 s-patience request on startup and flips the badge when the server answers. Keep the short probe short — a genuinely dead connection must still be detected fast.
+
+Render must be seeded once (`npm run seed` from a Render shell, with `SEED_OWNER_EMAIL`/`SEED_OWNER_PASSWORD` set so the default password never exists in production) and needs `JWT_SECRET`, `MONGODB_URI`, and `CORS_ORIGIN` env vars. `CORS_ORIGIN` only matters if the frontend ever calls Render directly instead of through the Netlify proxy.
+
 ## Product brief
 
 A backend and frontend to manage a laundry business.
