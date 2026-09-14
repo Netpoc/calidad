@@ -1,0 +1,96 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+npm workspaces monorepo: `server/` (Express + Mongoose API) and `client/` (Vue 3 PWA). Run from the repo root.
+
+```bash
+npm install                  # install both workspaces
+npm run dev                  # API on :4000 and client on :5173 together
+npm run dev:server           # API only (tsx watch)
+npm run dev:client           # client only (vite)
+npm run seed                 # branches + owner account + price list from the CSV
+npm run build                # tsc for server, vue-tsc + vite for client
+npm test                     # vitest, both workspaces
+```
+
+MongoDB must be running first — `mongod --dbpath <path>` locally, or point `MONGODB_URI` elsewhere. Copy `server/.env.example` to `server/.env`; `JWT_SECRET` is required and the server refuses to start without a valid config.
+
+`npm run seed` is idempotent and creates `owner@calidad.local` / `changeme123` on first run — change that password before any real deployment. Override with `SEED_OWNER_EMAIL` / `SEED_OWNER_PASSWORD`.
+
+Vite proxies `/api` to `:4000` in development, so the client needs no API base URL.
+
+Single test: `npm test --workspace server -- <pattern>` (vitest passes the pattern through).
+
+## Product brief
+
+A backend and frontend to manage a laundry business.
+
+- **Users:** Staff, Manager, Owner, Customer
+- **Business:** HQ, Branch 1, Branch 2, ... Branch N+1
+
+### Objective
+
+All users are capable of booking a laundry. A Manager manages their branch (a manager can manage multiple branches). The Owner manages all branches, and also creates other users and branches. Managers manage staff under their branch.
+
+Laundry is booked by registering a customer's laundry each-by-each. The Owner is also able to update price lists, products, and more.
+
+Manager and Owner dashboards display daily, monthly, and yearly revenue. All figures must be live as customers bring in their laundry. Calculations must also represent collected, pending collection, etc.
+
+Upon successful booking of laundry, a unique 6–8 character reference code is generated. Upon taking customer information, a unique customer ID is created, so that whenever the customer's phone number is provided for booking another laundry, that same unique ID is tagged to the new booking reference.
+
+When a booking is completed, an SMS is sent to the customer. When the laundry status is updated to *ready for collection*, an SMS is sent as well.
+
+### Stack
+
+- **Frontend:** Vue.js, Tailwind CSS, Pinia
+- **Backend:** Node.js
+- **Database:** MongoDB
+- **Delivery:** PWA + web app. Must be usable offline on mobile devices, with data pushed as soon as the device regains internet.
+
+**Ant Design was removed on the owner's instruction (2026-09-10) — do not reintroduce it.** The brief originally paired Tailwind with Ant Design Vue; the UI is now Tailwind-only, with a small in-house component kit in [client/src/components/ui/](client/src/components/ui/). Two things drove it beyond preference: antd cost ~435 kB gzipped (the whole app now precaches 409 kB, down from 1,785 kB), and its `<a-form>` silently swallowed submits unless given a `:model`, which broke login with no error. Reach for `components/ui/` first; add to it rather than pulling in a component library.
+
+Note: [skills/FULLSTACK.md](skills/FULLSTACK.md) is a generic third-party skill that recommends React/Next.js/Prisma/PostgreSQL. Its architecture and security advice is useful; its stack choices are **not** — the stack above wins.
+
+## Domain rules that cross multiple modules
+
+These are the constraints most likely to be violated by a change made in a single file:
+
+- **Customer identity is deduplicated by phone number.** Booking flow must look up an existing customer before creating one; a returning customer keeps their original customer ID while each booking gets a fresh 6–8 char reference code.
+- **Branch scoping is an authorization boundary, not a filter.** Manager access is scoped to their assigned branch IDs (plural — a manager may hold several); Owner access spans all branches. Every branch-scoped query and mutation must derive scope from the authenticated user, never from a client-supplied branch ID alone.
+- **Revenue figures derive from booking lifecycle + collection state**, not from summing booking totals. Collected vs. pending-collection must be distinguishable at daily/monthly/yearly granularity and aggregatable per branch and across all branches.
+- **Offline-first writes.** Bookings created offline are queued in IndexedDB and replayed to `POST /api/bookings/sync` on reconnect. The conflict story is settled: **the server is authoritative for reference codes, customer ids, and prices.** The client shows a `TMP-xxxxxx` placeholder and a provisional total until sync returns the real ones. Every queued booking carries a `clientRequestId` (UUID) that survives retries; the server enforces it with a unique partial index and returns the original booking on replay instead of creating a second one.
+- **Role boundaries:** the owner creates branches and any user; a manager may create and deactivate **staff only**, and only within branches they already hold — a manager must never be able to mint another manager or assign a branch outside their scope. Enforced in [auth.routes.ts](server/src/modules/auth/auth.routes.ts), not just hidden in the UI.
+- **SMS fires on exactly two transitions:** booking completed, and status → ready for collection. Sending never fails the booking (delivery is best-effort), and every send carries a `dedupeKey` (`booking:<id>:confirmed` / `:ready`) with a unique index, so an offline replay cannot double-text a customer.
+
+## Architecture
+
+**Money is stored in kobo** (integer minor units) everywhere — fields are suffixed `Minor`. Format for display only, at the edge.
+
+**Prices are snapshotted onto bookings.** `booking.items[].unitPriceMinor` is copied at booking time, so an owner editing the price list never rewrites what past customers were billed. Booking totals are recomputed in a `pre('validate')` hook rather than trusted from the client.
+
+**Server-side authorization lives in [server/src/middleware/auth.ts](server/src/middleware/auth.ts).** `resolveBranchScope()` derives the acting branch from the JWT and cross-checks any client-supplied `branchId`; `readableBranchIds()` returns `null` for owners (all branches) or the manager's/staff's assigned list. The client's route guards and role checks only hide UI — they are not the gate.
+
+**Both sides are feature-first** (`modules/auth`, `bookings`, `customers`, `pricing`, `dashboard`, `branches`, `notifications`), so a domain change stays in one folder. Shared vocabulary lives in [server/src/shared/domain.ts](server/src/shared/domain.ts), mirrored for the client in [client/src/api/types.ts](client/src/api/types.ts) — **keep those two in step.**
+
+**Phone normalization is the dedup key.** [server/src/shared/identity.ts](server/src/shared/identity.ts) `normalizePhone()` converts to E.164 assuming Nigerian numbers when no country code is given. Every path touching a phone number must normalize first, or `08031234567` and `+2348031234567` become two customers.
+
+**Reference codes** use a 25-character alphabet with `0/O`, `1/I/L`, `2/Z`, `5/S`, `8/B` removed, because staff read them aloud and copy them off paper tickets.
+
+**The UI kit lives in [client/src/components/ui/](client/src/components/ui/)** — `BaseButton`, `BaseInput`, `BaseSelect`, `MoneyInput`, `BaseModal`, `AlertBox`, `EmptyState`, `ToastHost`, and `AppIcon`. Icons are inline SVG paths in [icons.ts](client/src/components/ui/icons.ts), so there is no icon font or network request. Toasts replace antd's imperative `message` via [useToast](client/src/composables/useToast.ts), sharing one polite live region.
+
+**`MoneyInput` is the only place naira floats exist** — it takes and emits integer kobo. `null` is meaningful there: on the price list an empty field means the tier is not offered, which is not the same as free.
+
+**Design tokens are in [client/src/styles/tokens.css](client/src/styles/tokens.css).** Colour never carries meaning alone — every status pairs a colour with an icon and a word ([display.ts](client/src/api/display.ts)). Touch targets are ≥44px. Both are verified, not assumed: the browser audit in the workflow below catches regressions.
+
+**Changing `tailwind.config.js` requires a dev-server restart** — Vite does not pick up config changes through the PostCSS pipeline, and stale config produces phantom styling bugs.
+
+## Pricing data
+
+[laundry_price_list.csv](laundry_price_list.csv) is the initial price list (NGN) and defines the shape of the pricing model: each item has up to two service tiers — *Washing, Starching & Ironing* and *Starching & Ironing* — and many items (bedding, towels, curtains, "Bulk") have no second-tier price. The pricing schema must allow a service tier to be absent for an item rather than defaulting to zero. Prices are Owner-editable, so treat this CSV as seed data, not as a hardcoded table.
+
+## Skills in this repo
+
+[skills/](skills/) contains vendored third-party agent skills — [ux-designer/](skills/ux-designer/) (research, accessibility/WCAG AA, IA, interaction design, visual design — see its [AGENTS.md](skills/ux-designer/AGENTS.md) for the compiled ruleset), [FULLSTACK.md](skills/FULLSTACK.md), and [DEBUGGER.md](skills/DEBUGGER.md). They are reference material, not project configuration.

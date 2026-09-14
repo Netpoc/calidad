@@ -1,0 +1,57 @@
+/* Self-hosted, so the app still renders correctly with no connection. A
+   Google Fonts link would leave staff on a fallback face when offline. */
+@import '@fontsource/inter/latin-400.css';
+@import '@fontsource/inter/latin-600.css';
+@import '@fontsource/inter/latin-700.css';
+@import './tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-family:
+    Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Tabular figures keep money columns aligned as amounts change. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Booking happens on a phone at a counter, often one-handed. Inputs below
+   16px make iOS zoom on focus, which throws the layout off mid-entry. */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* Respect the notch on iOS when installed to the home screen. */
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* Every interactive element must be reachable and obviously focusable —
+   staff use these screens with wet hands and cheap styluses. */
+:focus-visible {
+  outline: 3px solid var(--brand-600);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Tap feedback: a press should register instantly, not after a transition. */
+.tap-card {
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.tap-card:active {
+  background-color: var(--brand-50);
+}

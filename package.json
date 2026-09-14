@@ -1,0 +1,22 @@
+{
+  "name": "calidad",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Laundry business management app — API and PWA",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "seed": "npm run seed --workspace server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

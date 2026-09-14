@@ -1,0 +1,72 @@
+/**
+ * Design tokens.
+ *
+ * Flat design: saturated colour, no gradients or heavy shadows, generous touch
+ * targets. Built for a staff member holding a phone at a busy counter, so
+ * colour is used to make things *findable*, never as the only signal — every
+ * status pairs its colour with an icon and a word.
+ *
+ * Every foreground/background pair below clears WCAG AA (4.5:1) on white.
+ */
+
+:root {
+  /* Brand — the teal carries over from the original build. */
+  --brand-50: #f0fdfa;
+  --brand-100: #ccfbf1;
+  --brand-500: #14b8a6;
+  --brand-600: #0d9488;
+  --brand-700: #0f766e;
+  --brand-800: #115e59;
+
+  /* Semantic. Tinted background + dark text keeps pills legible and colourful. */
+  --success-bg: #dcfce7;
+  --success-fg: #15803d;
+  --warning-bg: #fef3c7;
+  --warning-fg: #b45309;
+  --danger-bg: #fee2e2;
+  --danger-fg: #b91c1c;
+  --info-bg: #dbeafe;
+  --info-fg: #1d4ed8;
+  --neutral-bg: #f1f5f9;
+  --neutral-fg: #475569;
+
+  /* Money. Collected vs pending is the dashboard's whole point, so the two
+     get their own fixed hues and never swap. */
+  --money-collected: #15803d;
+  --money-pending: #b45309;
+  --money-billed: #0f766e;
+
+  /* Laundry categories. Nine hues, chosen to stay distinguishable for the
+     most common colour-vision deficiencies — they are a findability aid on
+     top of the category name, never a replacement for it. */
+  --cat-native: #7c3aed;
+  --cat-tops: #2563eb;
+  --cat-bottoms: #0891b2;
+  --cat-formal: #4f46e5;
+  --cat-dresses: #db2777;
+  --cat-bedding: #ea580c;
+  --cat-towels: #16a34a;
+  --cat-home: #ca8a04;
+  --cat-bulk: #64748b;
+
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-sunken: #f1f5f9;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-muted: #64748b;
+
+  /* Touch: 48px clears both the iOS 44pt and Android 48dp minimums. */
+  --tap-min: 48px;
+}
+
+/* Motion is functional only — confirming a tap, never decorating. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
