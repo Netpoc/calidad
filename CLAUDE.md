@@ -32,7 +32,7 @@ The API base is `import.meta.env.VITE_API_URL || '/api'` ([http.ts](client/src/a
 
 **Render's free tier sleeps after ~15 min idle and takes 20–50 s to wake.** The 4 s reachability probe would report Offline during that window, so [connection.ts](client/src/stores/connection.ts) `warmUp()` fires one 60 s-patience request on startup and flips the badge when the server answers. Keep the short probe short — a genuinely dead connection must still be detected fast.
 
-Render must be seeded once (`npm run seed` from a Render shell, with `SEED_OWNER_EMAIL`/`SEED_OWNER_PASSWORD` set so the default password never exists in production) and needs `JWT_SECRET`, `MONGODB_URI`, and `CORS_ORIGIN` env vars. `CORS_ORIGIN` only matters if the frontend ever calls Render directly instead of through the Netlify proxy.
+**Render seeds itself on first boot.** Render's free tier has no shell, so [seed.ts](server/src/scripts/seed.ts) `bootstrapIfEmpty()` runs from `index.ts` at startup: it acts only when the `users` collection is empty (so it can never touch a live database) and only when `SEED_OWNER_EMAIL` / `SEED_OWNER_PASSWORD` are set (so the default password never reaches production). Set those two plus `JWT_SECRET` and `MONGODB_URI` on Render and the first deploy creates the owner, branches, and price list. The seed never logs the password — on a hosted platform that line would land in persistent logs. Alternative with no code path at all: run `MONGODB_URI=<atlas-uri> npm run seed --workspace server` from a laptop. `CORS_ORIGIN` only matters if the frontend ever calls Render directly instead of through the Netlify proxy.
 
 ## Product brief
 

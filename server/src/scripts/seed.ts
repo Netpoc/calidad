@@ -1,6 +1,11 @@
 /**
  * Seeds branches, an owner account, and the price list from
  * laundry_price_list.csv. Safe to re-run: everything is upserted by natural key.
+ *
+ * Two entry points:
+ *   - `npm run seed` runs it as a CLI against MONGODB_URI (local or remote).
+ *   - `bootstrapIfEmpty()` runs it from server startup when the database has no
+ *     users at all — for hosts like Render's free tier that offer no shell.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
@@ -90,9 +95,8 @@ function toMinor(cell: string | undefined): number | null {
   return Number.isFinite(value) ? Math.round(value * 100) : null
 }
 
-async function seed(): Promise<void> {
-  await connectDb()
-
+/** Seeds over an already-open connection. */
+export async function runSeed(): Promise<void> {
   const hq = await BranchModel.findOneAndUpdate(
     { name: 'HQ' },
     { name: 'HQ', isHeadquarters: true, active: true },
@@ -118,7 +122,12 @@ async function seed(): Promise<void> {
       role: 'owner',
       branchIds: [],
     })
-    console.log(`Owner created: ${ownerEmail} / ${ownerPassword}  (change this password)`)
+    // Never echo the password: on a hosted platform this line lands in
+    // persistent, dashboard-visible logs.
+    console.log(`Owner created: ${ownerEmail}`)
+    if (!process.env.SEED_OWNER_PASSWORD) {
+      console.warn('  Using the default development password — change it before going live.')
+    }
   }
 
   const rows = parseCsv(readFileSync(CSV_PATH, 'utf8')).filter((row) => row.name)
@@ -144,12 +153,39 @@ async function seed(): Promise<void> {
     seeded++
   }
   console.log(`Price list seeded: ${seeded} items`)
-
-  await disconnectDb()
 }
 
-seed().catch(async (error) => {
-  console.error('Seed failed:', error)
-  await disconnectDb()
-  process.exit(1)
-})
+/**
+ * First-boot bootstrap. Only acts when there are no users at all, so it can
+ * never touch a live database, and only when the owner credentials are set,
+ * so the default password never appears in production by accident.
+ */
+export async function bootstrapIfEmpty(): Promise<void> {
+  if ((await UserModel.estimatedDocumentCount()) > 0) return
+
+  if (!process.env.SEED_OWNER_EMAIL || !process.env.SEED_OWNER_PASSWORD) {
+    console.warn(
+      'Database is empty but SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD are not set — ' +
+        'skipping bootstrap. Set them and restart, or run `npm run seed`.',
+    )
+    return
+  }
+
+  console.log('Empty database — running first-boot seed')
+  await runSeed()
+}
+
+// CLI entry: `npm run seed` / `tsx src/scripts/seed.ts`.
+const invokedDirectly =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])
+
+if (invokedDirectly) {
+  connectDb()
+    .then(runSeed)
+    .then(disconnectDb)
+    .catch(async (error) => {
+      console.error('Seed failed:', error)
+      await disconnectDb()
+      process.exit(1)
+    })
+}
