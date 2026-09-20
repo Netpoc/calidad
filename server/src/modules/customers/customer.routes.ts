@@ -2,13 +2,14 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler.js'
 import { authenticate, requireRole } from '../../middleware/auth.js'
+import { requireTenant, tenantOf } from '../../middleware/tenant.js'
 import { BookingModel } from '../bookings/booking.model.js'
-import { HttpError } from '../../shared/http-error.js'
+import { HttpError, param } from '../../shared/http-error.js'
 import { CustomerModel } from './customer.model.js'
 import { findOrCreateByPhone, searchCustomers } from './customer.service.js'
 
 const router = Router()
-router.use(authenticate, requireRole('staff'))
+router.use(authenticate, requireTenant, requireRole('staff'))
 
 /**
  * The counter lookup: staff type a phone number (in any format) or a name, and
@@ -18,7 +19,7 @@ router.get(
   '/search',
   asyncHandler(async (req, res) => {
     const q = typeof req.query.q === 'string' ? req.query.q : ''
-    res.json({ customers: await searchCustomers(q) })
+    res.json({ customers: await searchCustomers(tenantOf(req), q) })
   }),
 )
 
@@ -35,7 +36,7 @@ router.post(
       })
       .parse(req.body)
 
-    const { customer, created } = await findOrCreateByPhone(body)
+    const { customer, created } = await findOrCreateByPhone({ ...body, tenantId: tenantOf(req) })
     res.status(created ? 201 : 200).json({ customer, created })
   }),
 )
@@ -43,10 +44,11 @@ router.post(
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
-    const customer = await CustomerModel.findById(req.params.id)
+    const tenantId = tenantOf(req)
+    const customer = await CustomerModel.findOne({ _id: param(req, 'id'), tenantId })
     if (!customer) throw new HttpError(404, 'Customer not found')
 
-    const bookings = await BookingModel.find({ customerId: customer._id })
+    const bookings = await BookingModel.find({ tenantId, customerId: customer._id })
       .sort({ createdAt: -1 })
       .limit(50)
       .populate('branchId', 'name')

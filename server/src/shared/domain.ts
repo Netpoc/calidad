@@ -3,11 +3,21 @@
  * it can be imported by scripts, tests, and (by copy) the client.
  */
 
-export const ROLES = ['owner', 'manager', 'staff', 'customer'] as const
+/**
+ * `platform_admin` is the SaaS operator: creates businesses (tenants) and
+ * nothing else. It has no tenant of its own and is blocked from every
+ * business route by `requireTenant` — rank alone is not the gate.
+ */
+export const ROLES = ['platform_admin', 'owner', 'manager', 'staff', 'customer'] as const
 export type Role = (typeof ROLES)[number]
+
+/** Roles that live inside a business. Only these may be created via /auth/users. */
+export const TENANT_ROLES = ['owner', 'manager', 'staff', 'customer'] as const
+export type TenantRole = (typeof TENANT_ROLES)[number]
 
 /** Higher rank implies every capability of the ranks below it. */
 export const ROLE_RANK: Record<Role, number> = {
+  platform_admin: 4,
   owner: 3,
   manager: 2,
   staff: 1,

@@ -3,6 +3,7 @@ import { BranchModel } from '../branches/branch.model.js'
 import { CustomerModel } from '../customers/customer.model.js'
 import { findOrCreateByPhone } from '../customers/customer.service.js'
 import { PriceItemModel } from '../pricing/price-item.model.js'
+import { TenantModel } from '../tenants/tenant.model.js'
 import {
   bookingConfirmedMessage,
   readyForCollectionMessage,
@@ -19,6 +20,7 @@ export interface BookingItemInput {
 }
 
 export interface CreateBookingInput {
+  tenantId: string
   branchId: string
   createdByUserId: string
   customer: { name: string; phone: string; email?: string; address?: string }
@@ -44,8 +46,10 @@ export async function createBooking(input: CreateBookingInput): Promise<{
   customerCreated: boolean
   replayed: boolean
 }> {
+  const { tenantId } = input
+
   if (input.clientRequestId) {
-    const existing = await BookingModel.findOne({ clientRequestId: input.clientRequestId })
+    const existing = await BookingModel.findOne({ tenantId, clientRequestId: input.clientRequestId })
     if (existing) {
       // A replayed offline booking. Return the original rather than creating a
       // duplicate — and note that no SMS is re-sent.
@@ -53,10 +57,14 @@ export async function createBooking(input: CreateBookingInput): Promise<{
     }
   }
 
-  const branch = await BranchModel.findById(input.branchId)
-  if (!branch || !branch.active) {
-    throw new HttpError(404, 'Branch not found or inactive')
-  }
+  // Scoped by tenant even though the route already checked: the service must
+  // be safe on its own, whoever calls it.
+  const [branch, tenant] = await Promise.all([
+    BranchModel.findOne({ _id: input.branchId, tenantId, active: true }),
+    TenantModel.findById(tenantId).select('name').lean(),
+  ])
+  if (!branch) throw new HttpError(404, 'Branch not found or inactive')
+  if (!tenant) throw new HttpError(404, 'Business not found')
 
   if (input.items.length === 0) {
     throw new HttpError(400, 'A booking must contain at least one item')
@@ -64,12 +72,14 @@ export async function createBooking(input: CreateBookingInput): Promise<{
 
   const { customer, created } = await findOrCreateByPhone({
     ...input.customer,
+    tenantId,
     homeBranchId: input.branchId,
   })
 
-  const items = await priceItems(input.items, input.branchId)
+  const items = await priceItems(input.items, tenantId, input.branchId)
 
   const booking = await createWithUniqueReference({
+    tenantId: new Types.ObjectId(tenantId),
     branchId: new Types.ObjectId(input.branchId),
     customerId: customer._id,
     createdByUserId: new Types.ObjectId(input.createdByUserId),
@@ -86,11 +96,13 @@ export async function createBooking(input: CreateBookingInput): Promise<{
   })
 
   await sendSms({
+    tenantId,
     to: customer.phone,
     message: bookingConfirmedMessage({
       customerName: customer.name,
       referenceCode: booking.referenceCode,
       totalMinor: booking.totalMinor,
+      businessName: tenant.name,
       branchName: branch.name,
     }),
     dedupeKey: `booking:${booking._id.toString()}:confirmed`,
@@ -104,10 +116,11 @@ export async function createBooking(input: CreateBookingInput): Promise<{
  * Resolves each line against the price list, rejecting tiers an item does not
  * offer — a missing tier price means "not offered", not free (CLAUDE.md).
  */
-async function priceItems(inputs: BookingItemInput[], branchId: string) {
+async function priceItems(inputs: BookingItemInput[], tenantId: string, branchId: string) {
   const ids = inputs.map((item) => item.priceItemId)
   const priceItems = await PriceItemModel.find({
     _id: { $in: ids },
+    tenantId,
     active: true,
     $or: [{ branchId: null }, { branchId }],
   })
@@ -175,11 +188,12 @@ async function createWithUniqueReference(
 
 /** Advances the laundry lifecycle, firing the ready-for-collection SMS. */
 export async function updateBookingStatus(params: {
+  tenantId: string
   bookingId: string
   status: BookingStatus
   byUserId: string
 }): Promise<BookingDoc> {
-  const booking = await BookingModel.findById(params.bookingId)
+  const booking = await BookingModel.findOne({ _id: params.bookingId, tenantId: params.tenantId })
   if (!booking) throw new HttpError(404, 'Booking not found')
 
   if (booking.status === params.status) return booking
@@ -198,17 +212,20 @@ export async function updateBookingStatus(params: {
   await booking.save()
 
   if (params.status === 'ready_for_collection') {
-    const [customer, branch] = await Promise.all([
-      CustomerModel.findById(booking.customerId),
-      BranchModel.findById(booking.branchId),
+    const [customer, branch, tenant] = await Promise.all([
+      CustomerModel.findOne({ _id: booking.customerId, tenantId: params.tenantId }),
+      BranchModel.findOne({ _id: booking.branchId, tenantId: params.tenantId }),
+      TenantModel.findById(params.tenantId).select('name').lean(),
     ])
-    if (customer && branch) {
+    if (customer && branch && tenant) {
       await sendSms({
+        tenantId: params.tenantId,
         to: customer.phone,
         message: readyForCollectionMessage({
           customerName: customer.name,
           referenceCode: booking.referenceCode,
           balanceMinor: booking.totalMinor - booking.paidMinor,
+          businessName: tenant.name,
           branchName: branch.name,
         }),
         dedupeKey: `booking:${booking._id.toString()}:ready`,
@@ -221,12 +238,13 @@ export async function updateBookingStatus(params: {
 }
 
 export async function recordPayment(params: {
+  tenantId: string
   bookingId: string
   amountMinor: number
 }): Promise<BookingDoc> {
   if (params.amountMinor <= 0) throw new HttpError(400, 'Payment must be positive')
 
-  const booking = await BookingModel.findById(params.bookingId)
+  const booking = await BookingModel.findOne({ _id: params.bookingId, tenantId: params.tenantId })
   if (!booking) throw new HttpError(404, 'Booking not found')
 
   const balance = booking.totalMinor - booking.paidMinor

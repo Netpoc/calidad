@@ -2,6 +2,7 @@ import { Schema, model, type InferSchemaType } from 'mongoose'
 
 const smsLogSchema = new Schema(
   {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     to: { type: String, required: true },
     message: { type: String, required: true },
     /** e.g. `booking:<id>:confirmed` — see sendSms in sms.service.ts. */
@@ -16,7 +17,9 @@ const smsLogSchema = new Schema(
   { timestamps: true },
 )
 
+/** Stays global: the key embeds the booking _id, which is globally unique. */
 smsLogSchema.index({ dedupeKey: 1 }, { unique: true })
+smsLogSchema.index({ tenantId: 1, createdAt: -1 })
 
 export type SmsLog = InferSchemaType<typeof smsLogSchema>
 export const SmsLogModel = model('SmsLog', smsLogSchema)

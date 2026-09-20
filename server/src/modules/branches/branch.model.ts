@@ -2,6 +2,7 @@ import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mong
 
 const branchSchema = new Schema(
   {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     name: { type: String, required: true, trim: true },
     /** HQ is a branch too, flagged so reports can single it out. */
     isHeadquarters: { type: Boolean, default: false },
@@ -12,7 +13,8 @@ const branchSchema = new Schema(
   { timestamps: true },
 )
 
-branchSchema.index({ name: 1 }, { unique: true })
+/** Every business has an "HQ"; names are unique within a business only. */
+branchSchema.index({ tenantId: 1, name: 1 }, { unique: true })
 
 export type Branch = InferSchemaType<typeof branchSchema>
 export type BranchDoc = HydratedDocument<Branch>

@@ -31,6 +31,7 @@ export function getDriver(): SmsDriver {
  * unique index and a repeat send is skipped rather than re-sent.
  */
 export async function sendSms(params: {
+  tenantId: string
   to: string
   message: string
   dedupeKey: string
@@ -43,6 +44,7 @@ export async function sendSms(params: {
 
   const driver = getDriver()
   const log = await SmsLogModel.create({
+    tenantId: params.tenantId,
     to: params.to,
     message: params.message,
     dedupeKey: params.dedupeKey,
@@ -67,14 +69,17 @@ export async function sendSms(params: {
   }
 }
 
+/** The business name leads: the customer knows the laundry, not our platform. */
 export function bookingConfirmedMessage(params: {
   customerName: string
   referenceCode: string
   totalMinor: number
+  businessName: string
   branchName: string
 }): string {
   return (
-    `Hi ${params.customerName}, your laundry is booked at ${params.branchName}. ` +
+    `Hi ${params.customerName}, your laundry is booked with ${params.businessName} ` +
+    `(${params.branchName}). ` +
     `Ref: ${params.referenceCode}. Total: ${formatNaira(params.totalMinor)}. ` +
     `Quote this reference on collection.`
   )
@@ -84,13 +89,14 @@ export function readyForCollectionMessage(params: {
   customerName: string
   referenceCode: string
   balanceMinor: number
+  businessName: string
   branchName: string
 }): string {
   const balance =
     params.balanceMinor > 0 ? ` Outstanding balance: ${formatNaira(params.balanceMinor)}.` : ''
   return (
     `Hi ${params.customerName}, your laundry (Ref: ${params.referenceCode}) is ready for ` +
-    `collection at ${params.branchName}.${balance}`
+    `collection at ${params.businessName}, ${params.branchName}.${balance}`
   )
 }
 

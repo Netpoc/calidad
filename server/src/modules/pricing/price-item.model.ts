@@ -7,6 +7,7 @@ import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mong
  */
 const priceItemSchema = new Schema(
   {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true, index: true },
     name: { type: String, required: true, trim: true },
     category: { type: String, trim: true, default: 'general' },
     washStarchIronMinor: { type: Number, default: null, min: 0 },
@@ -19,7 +20,8 @@ const priceItemSchema = new Schema(
   { timestamps: true },
 )
 
-priceItemSchema.index({ branchId: 1, name: 1 }, { unique: true })
+/** A null branchId indexes as a value, so "global per business" stays unique. */
+priceItemSchema.index({ tenantId: 1, branchId: 1, name: 1 }, { unique: true })
 
 priceItemSchema.pre('validate', function (next) {
   if (this.washStarchIronMinor == null && this.starchIronMinor == null) {

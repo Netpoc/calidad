@@ -30,11 +30,15 @@ export interface RevenuePoint extends RevenueSummary {
  * the caller's authorized scope and must already have been validated.
  */
 function matchStage(params: {
+  tenantId: string
   branchIds: string[] | null
   from: Date
   to: Date
 }): Record<string, unknown> {
+  // The one choke point for every dashboard aggregation, so the tenant
+  // filter lives here and cannot be forgotten by a new report.
   const match: Record<string, unknown> = {
+    tenantId: new Types.ObjectId(params.tenantId),
     status: { $ne: 'cancelled' },
     createdAt: { $gte: params.from, $lt: params.to },
   }
@@ -55,6 +59,7 @@ const REVENUE_FIELDS = {
 } as const
 
 export async function summarize(params: {
+  tenantId: string
   branchIds: string[] | null
   from: Date
   to: Date
@@ -81,6 +86,7 @@ const FORMATS: Record<Period, string> = {
 
 /** A time series for the dashboard charts, bucketed by day, month, or year. */
 export async function timeSeries(params: {
+  tenantId: string
   branchIds: string[] | null
   from: Date
   to: Date
@@ -116,6 +122,7 @@ export async function timeSeries(params: {
 
 /** Per-branch breakdown, so an owner can compare branches at a glance. */
 export async function byBranch(params: {
+  tenantId: string
   branchIds: string[] | null
   from: Date
   to: Date
@@ -141,6 +148,7 @@ export async function byBranch(params: {
 
 /** Day / month / year to date, the three headline figures on the dashboard. */
 export async function headline(params: {
+  tenantId: string
   branchIds: string[] | null
   now?: Date
 }): Promise<Record<Period, RevenueSummary>> {
@@ -150,10 +158,11 @@ export async function headline(params: {
   const startOfYear = new Date(now.getFullYear(), 0, 1)
   const end = new Date(now.getTime() + 1000)
 
+  const scope = { tenantId: params.tenantId, branchIds: params.branchIds }
   const [day, month, year] = await Promise.all([
-    summarize({ branchIds: params.branchIds, from: startOfDay, to: end }),
-    summarize({ branchIds: params.branchIds, from: startOfMonth, to: end }),
-    summarize({ branchIds: params.branchIds, from: startOfYear, to: end }),
+    summarize({ ...scope, from: startOfDay, to: end }),
+    summarize({ ...scope, from: startOfMonth, to: end }),
+    summarize({ ...scope, from: startOfYear, to: end }),
   ])
 
   return { day, month, year }

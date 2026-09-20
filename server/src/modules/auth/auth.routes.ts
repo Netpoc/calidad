@@ -2,8 +2,10 @@ import { Router } from 'express'
 import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler.js'
 import { authenticate, requireRole, signToken } from '../../middleware/auth.js'
-import { ROLES, type Role } from '../../shared/domain.js'
+import { assertBranchesInTenant, requireTenant, tenantOf } from '../../middleware/tenant.js'
+import { TENANT_ROLES, type Role } from '../../shared/domain.js'
 import { HttpError, param } from '../../shared/http-error.js'
+import { TenantModel } from '../tenants/tenant.model.js'
 import { UserModel, hashPassword } from './user.model.js'
 
 const router = Router()
@@ -22,9 +24,19 @@ router.post(
       throw new HttpError(401, 'Invalid email or password')
     }
 
+    // A business user's tenant must exist and be active. 403 rather than 401
+    // so the client shows the message instead of treating it as a bad token.
+    let tenant: { id: string; name: string } | null = null
+    if (user.role !== 'platform_admin') {
+      const doc = user.tenantId ? await TenantModel.findById(user.tenantId) : null
+      if (!doc || !doc.active) throw new HttpError(403, 'This business has been deactivated')
+      tenant = { id: doc._id.toString(), name: doc.name }
+    }
+
     const token = signToken({
       userId: user._id.toString(),
       role: user.role as Role,
+      tenantId: tenant?.id ?? null,
       branchIds: user.branchIds.map((id) => id.toString()),
     })
 
@@ -35,8 +47,10 @@ router.post(
         name: user.name,
         email: user.email,
         role: user.role,
+        tenantId: tenant?.id ?? null,
         branchIds: user.branchIds,
       },
+      tenant,
     })
   }),
 )
@@ -55,7 +69,8 @@ const createUserSchema = z.object({
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(8),
-  role: z.enum(ROLES),
+  // TENANT_ROLES, not ROLES: a platform admin can never be minted from inside a business.
+  role: z.enum(TENANT_ROLES),
   phone: z.string().optional(),
   branchIds: z.array(z.string()).default([]),
 })
@@ -69,10 +84,12 @@ const createUserSchema = z.object({
 router.post(
   '/users',
   authenticate,
+  requireTenant,
   requireRole('manager'),
   asyncHandler(async (req, res) => {
     const body = createUserSchema.parse(req.body)
     const auth = req.auth!
+    const tenantId = tenantOf(req)
 
     if (auth.role !== 'owner') {
       if (body.role !== 'staff') {
@@ -91,7 +108,12 @@ router.post(
       throw new HttpError(400, 'Managers and staff must be assigned at least one branch')
     }
 
+    // The token will carry these branch ids and resolveBranchScope trusts
+    // them, so they must be proven to belong to this business.
+    await assertBranchesInTenant(tenantId, body.branchIds)
+
     const user = await UserModel.create({
+      tenantId,
       name: body.name,
       email: body.email,
       phone: body.phone ?? '',
@@ -110,6 +132,7 @@ router.post(
 router.patch(
   '/users/:id',
   authenticate,
+  requireTenant,
   requireRole('manager'),
   asyncHandler(async (req, res) => {
     const body = z
@@ -122,8 +145,10 @@ router.patch(
       .parse(req.body)
 
     const auth = req.auth!
-    const target = await UserModel.findById(param(req, 'id'))
+    const tenantId = tenantOf(req)
+    const target = await UserModel.findOne({ _id: param(req, 'id'), tenantId })
     if (!target) throw new HttpError(404, 'User not found')
+    if (body.branchIds) await assertBranchesInTenant(tenantId, body.branchIds)
 
     if (auth.role !== 'owner') {
       if (target.role !== 'staff') {
@@ -149,11 +174,12 @@ router.patch(
 router.get(
   '/users',
   authenticate,
+  requireTenant,
   requireRole('manager'),
   asyncHandler(async (req, res) => {
-    // A manager sees only staff in the branches they manage.
-    const filter: Record<string, unknown> =
-      req.auth!.role === 'owner' ? {} : { branchIds: { $in: req.auth!.branchIds } }
+    // Always the caller's business; a manager additionally sees only their branches.
+    const filter: Record<string, unknown> = { tenantId: tenantOf(req) }
+    if (req.auth!.role !== 'owner') filter.branchIds = { $in: req.auth!.branchIds }
 
     const users = await UserModel.find(filter).populate('branchIds', 'name').sort({ name: 1 })
     res.json({ users })

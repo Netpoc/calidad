@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from 'express'
+import mongoose from 'mongoose'
 import { ZodError } from 'zod'
 import { env } from '../config/env.js'
 import { HttpError } from '../shared/http-error.js'
@@ -26,6 +27,13 @@ export function errorHandler(
 
   if (error instanceof HttpError) {
     res.status(error.status).json({ error: error.message, details: error.details })
+    return
+  }
+
+  // A malformed ObjectId in a tenant-scoped findOne is a bad request, not a
+  // server fault — and must not leak a stack trace.
+  if (error instanceof mongoose.Error.CastError) {
+    res.status(400).json({ error: 'Invalid identifier' })
     return
   }
 

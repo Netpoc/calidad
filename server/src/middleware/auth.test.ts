@@ -5,10 +5,22 @@ const BRANCH_A = '507f1f77bcf86cd799439011'
 const BRANCH_B = '507f1f77bcf86cd799439012'
 const BRANCH_C = '507f1f77bcf86cd799439013'
 
-const owner: AuthPrincipal = { userId: 'u1', role: 'owner', branchIds: [] }
-const multiManager: AuthPrincipal = { userId: 'u2', role: 'manager', branchIds: [BRANCH_A, BRANCH_B] }
-const soloStaff: AuthPrincipal = { userId: 'u3', role: 'staff', branchIds: [BRANCH_A] }
-const unassigned: AuthPrincipal = { userId: 'u4', role: 'staff', branchIds: [] }
+const T = '507f1f77bcf86cd799439099'
+const owner: AuthPrincipal = { userId: 'u1', role: 'owner', tenantId: T, branchIds: [] }
+const multiManager: AuthPrincipal = {
+  userId: 'u2',
+  role: 'manager',
+  tenantId: T,
+  branchIds: [BRANCH_A, BRANCH_B],
+}
+const soloStaff: AuthPrincipal = { userId: 'u3', role: 'staff', tenantId: T, branchIds: [BRANCH_A] }
+const unassigned: AuthPrincipal = { userId: 'u4', role: 'staff', tenantId: T, branchIds: [] }
+const platformAdmin: AuthPrincipal = {
+  userId: 'u5',
+  role: 'platform_admin',
+  tenantId: null,
+  branchIds: [],
+}
 
 describe('resolveBranchScope', () => {
   it('lets an owner act on any branch they name', () => {
@@ -38,6 +50,11 @@ describe('resolveBranchScope', () => {
 
   it('rejects a malformed branch id from an owner', () => {
     expect(() => resolveBranchScope(owner, 'not-an-objectid')).toThrow(/Invalid branchId/)
+  })
+
+  it('refuses a platform admin outright, whatever branch they name', () => {
+    // Rank 4 would sail past requireRole; the tenant check is the real gate.
+    expect(() => resolveBranchScope(platformAdmin, BRANCH_A)).toThrow(/Platform accounts/)
   })
 })
 

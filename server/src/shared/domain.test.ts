@@ -42,7 +42,8 @@ describe('paymentStatusFor', () => {
 })
 
 describe('role hierarchy', () => {
-  it('ranks owner above manager above staff', () => {
+  it('ranks platform admin above owner above manager above staff', () => {
+    expect(ROLE_RANK.platform_admin).toBeGreaterThan(ROLE_RANK.owner)
     expect(ROLE_RANK.owner).toBeGreaterThan(ROLE_RANK.manager)
     expect(ROLE_RANK.manager).toBeGreaterThan(ROLE_RANK.staff)
     expect(ROLE_RANK.staff).toBeGreaterThan(ROLE_RANK.customer)

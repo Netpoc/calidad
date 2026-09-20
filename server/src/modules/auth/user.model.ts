@@ -3,6 +3,8 @@ import { Schema, model, type Model, type HydratedDocument } from 'mongoose'
 import { ROLES, type Role } from '../../shared/domain.js'
 
 export interface User {
+  /** Null only for platform admins, who belong to no business. */
+  tenantId: import('mongoose').Types.ObjectId | null
   name: string
   email: string
   phone: string
@@ -22,6 +24,7 @@ type UserModelType = Model<User, {}, UserMethods>
 
 const userSchema = new Schema<User, UserModelType, UserMethods>(
   {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', default: null },
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, trim: true, lowercase: true },
     phone: { type: String, trim: true, default: '' },
@@ -37,7 +40,9 @@ const userSchema = new Schema<User, UserModelType, UserMethods>(
   { timestamps: true },
 )
 
+/** Email stays globally unique: login resolves the user, and so the tenant, from it. */
 userSchema.index({ email: 1 }, { unique: true })
+userSchema.index({ tenantId: 1, role: 1 })
 
 userSchema.methods.verifyPassword = function (plain: string): Promise<boolean> {
   return bcrypt.compare(plain, this.passwordHash)

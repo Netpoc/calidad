@@ -10,6 +10,12 @@ const schema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   SMS_DRIVER: z.enum(['log']).default('log'),
   SMS_SENDER_ID: z.string().default('Calidad'),
+  /**
+   * First-boot bootstrap for hosts without a shell: when the database has no
+   * users and both are set, a platform admin is created on startup.
+   */
+  PLATFORM_ADMIN_EMAIL: z.string().email().optional(),
+  PLATFORM_ADMIN_PASSWORD: z.string().min(8).optional(),
 })
 
 const parsed = schema.safeParse(process.env)

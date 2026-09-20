@@ -1,12 +1,14 @@
 import { Router } from 'express'
+import { Types } from 'mongoose'
 import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler.js'
 import { authenticate, requireRole } from '../../middleware/auth.js'
-import { HttpError } from '../../shared/http-error.js'
+import { assertBranchesInTenant, requireTenant, tenantOf } from '../../middleware/tenant.js'
+import { HttpError, param } from '../../shared/http-error.js'
 import { PriceItemModel } from './price-item.model.js'
 
 const router = Router()
-router.use(authenticate)
+router.use(authenticate, requireTenant)
 
 /**
  * The price list every client caches for offline booking. Branch-specific
@@ -16,7 +18,11 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const branchId = typeof req.query.branchId === 'string' ? req.query.branchId : null
+    if (branchId !== null && !Types.ObjectId.isValid(branchId)) {
+      throw new HttpError(400, 'Invalid branchId')
+    }
     const items = await PriceItemModel.find({
+      tenantId: tenantOf(req),
       active: true,
       $or: [{ branchId: null }, ...(branchId ? [{ branchId }] : [])],
     }).sort({ sortOrder: 1, name: 1 })
@@ -50,7 +56,9 @@ router.post(
     if (body.washStarchIronMinor == null && body.starchIronMinor == null) {
       throw new HttpError(400, 'A price item must offer at least one service tier')
     }
-    const item = await PriceItemModel.create(body)
+    const tenantId = tenantOf(req)
+    if (body.branchId) await assertBranchesInTenant(tenantId, [body.branchId])
+    const item = await PriceItemModel.create({ ...body, tenantId })
     res.status(201).json({ item })
   }),
 )
@@ -60,7 +68,7 @@ router.patch(
   requireRole('owner'),
   asyncHandler(async (req, res) => {
     const body = priceSchema.partial().extend({ active: z.boolean().optional() }).parse(req.body)
-    const item = await PriceItemModel.findById(req.params.id)
+    const item = await PriceItemModel.findOne({ _id: param(req, 'id'), tenantId: tenantOf(req) })
     if (!item) throw new HttpError(404, 'Price item not found')
 
     item.set(body)

@@ -35,9 +35,10 @@ const statusEventSchema = new Schema(
 
 const bookingSchema = new Schema(
   {
+    tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
     referenceCode: { type: String, required: true, default: generateReferenceCode },
-    branchId: { type: Schema.Types.ObjectId, ref: 'Branch', required: true, index: true },
-    customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true, index: true },
+    branchId: { type: Schema.Types.ObjectId, ref: 'Branch', required: true },
+    customerId: { type: Schema.Types.ObjectId, ref: 'Customer', required: true },
     createdByUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
 
     items: { type: [bookingItemSchema], required: true, validate: (v: unknown[]) => v.length > 0 },
@@ -66,14 +67,22 @@ const bookingSchema = new Schema(
   { timestamps: true },
 )
 
+/** Globally unique: 8 chars from a 25-char alphabet, and lookups always add tenantId. */
 bookingSchema.index({ referenceCode: 1 }, { unique: true })
+/**
+ * Idempotency key is per business: a device generates it locally, so two
+ * businesses could in theory collide, and a replay must never return another
+ * business's booking.
+ */
 bookingSchema.index(
-  { clientRequestId: 1 },
+  { tenantId: 1, clientRequestId: 1 },
   { unique: true, partialFilterExpression: { clientRequestId: { $type: 'string' } } },
 )
-/** Dashboard aggregations scan by branch and date. */
-bookingSchema.index({ branchId: 1, createdAt: -1 })
-bookingSchema.index({ branchId: 1, status: 1, createdAt: -1 })
+/** Dashboard aggregations and lists scan by tenant, branch and date. */
+bookingSchema.index({ tenantId: 1, createdAt: -1 })
+bookingSchema.index({ tenantId: 1, branchId: 1, createdAt: -1 })
+bookingSchema.index({ tenantId: 1, branchId: 1, status: 1, createdAt: -1 })
+bookingSchema.index({ tenantId: 1, customerId: 1, createdAt: -1 })
 
 bookingSchema.pre('validate', function (next) {
   const subtotal = this.items.reduce((sum, item) => sum + item.lineTotalMinor, 0)

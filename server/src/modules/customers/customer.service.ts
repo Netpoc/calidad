@@ -2,6 +2,7 @@ import { CustomerModel, type CustomerDoc } from './customer.model.js'
 import { normalizePhone } from '../../shared/identity.js'
 
 export interface CustomerInput {
+  tenantId: string
   name: string
   phone: string
   email?: string
@@ -14,6 +15,8 @@ export interface CustomerInput {
  * customerId, and only the booking reference is new. Every booking path must
  * come through here rather than creating customers directly.
  *
+ * Dedup is per business: the same phone at two laundries is two customers.
+ *
  * Concurrency: two tills registering the same walk-in customer at once would
  * both miss on the read, so we lean on the unique phone index and treat a
  * duplicate-key error as "someone else won the race" and re-read.
@@ -22,8 +25,9 @@ export async function findOrCreateByPhone(
   input: CustomerInput,
 ): Promise<{ customer: CustomerDoc; created: boolean }> {
   const phone = normalizePhone(input.phone)
+  const { tenantId } = input
 
-  const existing = await CustomerModel.findOne({ phone })
+  const existing = await CustomerModel.findOne({ tenantId, phone })
   if (existing) {
     // Fill in details we did not have before, but never silently rename.
     let touched = false
@@ -41,6 +45,7 @@ export async function findOrCreateByPhone(
 
   try {
     const customer = await CustomerModel.create({
+      tenantId,
       name: input.name,
       phone,
       email: input.email ?? '',
@@ -50,14 +55,18 @@ export async function findOrCreateByPhone(
     return { customer, created: true }
   } catch (error) {
     if (isDuplicateKeyError(error)) {
-      const raced = await CustomerModel.findOne({ phone })
+      const raced = await CustomerModel.findOne({ tenantId, phone })
       if (raced) return { customer: raced, created: false }
     }
     throw error
   }
 }
 
-export async function searchCustomers(query: string, limit = 20): Promise<CustomerDoc[]> {
+export async function searchCustomers(
+  tenantId: string,
+  query: string,
+  limit = 20,
+): Promise<CustomerDoc[]> {
   const trimmed = query.trim()
   if (!trimmed) return []
 
@@ -65,7 +74,7 @@ export async function searchCustomers(query: string, limit = 20): Promise<Custom
   // regardless of how the staff member typed it.
   if (/\d/.test(trimmed)) {
     try {
-      const byPhone = await CustomerModel.findOne({ phone: normalizePhone(trimmed) })
+      const byPhone = await CustomerModel.findOne({ tenantId, phone: normalizePhone(trimmed) })
       if (byPhone) return [byPhone]
     } catch {
       // Not a usable phone number; fall through to name search.
@@ -73,6 +82,7 @@ export async function searchCustomers(query: string, limit = 20): Promise<Custom
   }
 
   return CustomerModel.find({
+    tenantId,
     $or: [
       { name: { $regex: escapeRegex(trimmed), $options: 'i' } },
       { customerId: trimmed.toUpperCase() },

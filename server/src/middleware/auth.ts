@@ -8,7 +8,9 @@ import { HttpError } from '../shared/http-error.js'
 export interface AuthPrincipal {
   userId: string
   role: Role
-  /** Empty for owners, whose scope is every branch. */
+  /** The business this account belongs to. Null only for platform admins. */
+  tenantId: string | null
+  /** Empty for owners, whose scope is every branch of their business. */
   branchIds: string[]
 }
 
@@ -62,6 +64,10 @@ export function requireRole(minimum: Role) {
  * client-supplied branch id rather than trusting it.
  */
 export function resolveBranchScope(auth: AuthPrincipal, requestedBranchId?: string): string {
+  if (!auth.tenantId) {
+    throw new HttpError(403, 'Platform accounts cannot act inside a business')
+  }
+
   if (auth.role === 'owner') {
     if (!requestedBranchId) throw new HttpError(400, 'branchId is required')
     if (!Types.ObjectId.isValid(requestedBranchId)) throw new HttpError(400, 'Invalid branchId')

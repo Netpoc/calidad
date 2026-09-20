@@ -1,6 +1,12 @@
 import { Router } from 'express'
 import { z } from 'zod'
-import { authenticate, readableBranchIds, resolveBranchScope, requireRole } from '../../middleware/auth.js'
+import { authenticate, readableBranchIds, requireRole } from '../../middleware/auth.js'
+import {
+  requireTenant,
+  resolveTenantBranch,
+  tenantOf,
+  type TenantPrincipal,
+} from '../../middleware/tenant.js'
 import { asyncHandler } from '../../middleware/async-handler.js'
 import { BOOKING_STATUSES, SERVICE_TIERS } from '../../shared/domain.js'
 import { HttpError, param } from '../../shared/http-error.js'
@@ -8,7 +14,7 @@ import { BookingModel } from './booking.model.js'
 import { createBooking, recordPayment, updateBookingStatus } from './booking.service.js'
 
 const router = Router()
-router.use(authenticate, requireRole('staff'))
+router.use(authenticate, requireTenant, requireRole('staff'))
 
 const createSchema = z.object({
   branchId: z.string().optional(),
@@ -37,12 +43,14 @@ router.post(
   '/',
   asyncHandler(async (req, res) => {
     const body = createSchema.parse(req.body)
-    const branchId = resolveBranchScope(req.auth!, body.branchId)
+    const auth = req.auth as TenantPrincipal
+    const branchId = await resolveTenantBranch(auth, body.branchId)
 
     const { booking, customerCreated, replayed } = await createBooking({
       ...body,
+      tenantId: auth.tenantId,
       branchId,
-      createdByUserId: req.auth!.userId,
+      createdByUserId: auth.userId,
     })
 
     res.status(replayed ? 200 : 201).json({ booking, customerCreated, replayed })
@@ -63,15 +71,17 @@ router.post(
   '/sync',
   asyncHandler(async (req, res) => {
     const { bookings } = syncSchema.parse(req.body)
+    const auth = req.auth as TenantPrincipal
 
     const results = await Promise.all(
       bookings.map(async (entry) => {
         try {
-          const branchId = resolveBranchScope(req.auth!, entry.branchId)
+          const branchId = await resolveTenantBranch(auth, entry.branchId)
           const { booking, replayed } = await createBooking({
             ...entry,
+            tenantId: auth.tenantId,
             branchId,
-            createdByUserId: req.auth!.userId,
+            createdByUserId: auth.userId,
             syncedFromOffline: true,
           })
           return {
@@ -99,7 +109,7 @@ router.get(
   '/',
   asyncHandler(async (req, res) => {
     const scope = readableBranchIds(req.auth!)
-    const filter: Record<string, unknown> = {}
+    const filter: Record<string, unknown> = { tenantId: tenantOf(req) }
     if (scope !== null) filter.branchId = { $in: scope }
 
     const status = req.query.status
@@ -122,7 +132,10 @@ router.get(
 router.get(
   '/reference/:code',
   asyncHandler(async (req, res) => {
+    // Tenant is part of the lookup, so a foreign code is a plain 404 rather
+    // than an existence leak.
     const booking = await BookingModel.findOne({
+      tenantId: tenantOf(req),
       referenceCode: param(req, 'code').toUpperCase(),
     })
       .populate('customerId', 'name phone customerId')
@@ -144,9 +157,10 @@ router.patch(
   asyncHandler(async (req, res) => {
     const { status } = z.object({ status: z.enum(BOOKING_STATUSES) }).parse(req.body)
     const bookingId = param(req, 'id')
-    await assertBookingInScope(bookingId, req.auth!)
+    await assertBookingInScope(bookingId, req.auth as TenantPrincipal)
 
     const booking = await updateBookingStatus({
+      tenantId: tenantOf(req),
       bookingId,
       status,
       byUserId: req.auth!.userId,
@@ -160,22 +174,26 @@ router.post(
   asyncHandler(async (req, res) => {
     const { amountMinor } = z.object({ amountMinor: z.number().int().min(1) }).parse(req.body)
     const bookingId = param(req, 'id')
-    await assertBookingInScope(bookingId, req.auth!)
+    await assertBookingInScope(bookingId, req.auth as TenantPrincipal)
 
-    const booking = await recordPayment({ bookingId, amountMinor })
+    const booking = await recordPayment({ tenantId: tenantOf(req), bookingId, amountMinor })
     res.json({ booking })
   }),
 )
 
-async function assertBookingInScope(
-  bookingId: string,
-  auth: NonNullable<Express.Request['auth']>,
-): Promise<void> {
+/**
+ * The tenant lookup always runs — including for owners. The old version
+ * returned early for owners without touching the database, which was exactly
+ * the path an owner could use to reach another business's booking by id.
+ */
+async function assertBookingInScope(bookingId: string, auth: TenantPrincipal): Promise<void> {
+  const booking = await BookingModel.findOne({ _id: bookingId, tenantId: auth.tenantId }).select(
+    'branchId',
+  )
+  if (!booking) throw new HttpError(404, 'Booking not found')
+
   const scope = readableBranchIds(auth)
   if (scope === null) return
-
-  const booking = await BookingModel.findById(bookingId).select('branchId')
-  if (!booking) throw new HttpError(404, 'Booking not found')
   if (!scope.includes(booking.branchId.toString())) {
     throw new HttpError(403, 'Booking outside your assigned scope')
   }

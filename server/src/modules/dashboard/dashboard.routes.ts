@@ -2,12 +2,13 @@ import { Router, type Request } from 'express'
 import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler.js'
 import { authenticate, readableBranchIds, requireRole } from '../../middleware/auth.js'
+import { requireTenant, tenantOf } from '../../middleware/tenant.js'
 import { HttpError } from '../../shared/http-error.js'
 import { byBranch, headline, timeSeries } from './dashboard.service.js'
 
 const router = Router()
 /** Dashboards are for managers and owners (CLAUDE.md). */
-router.use(authenticate, requireRole('manager'))
+router.use(authenticate, requireTenant, requireRole('manager'))
 
 /**
  * Narrows the caller's authorized scope by an optional branchId filter. An
@@ -29,7 +30,7 @@ function scopeFor(req: Request): string[] | null {
 router.get(
   '/summary',
   asyncHandler(async (req, res) => {
-    res.json({ summary: await headline({ branchIds: scopeFor(req) }) })
+    res.json({ summary: await headline({ tenantId: tenantOf(req), branchIds: scopeFor(req) }) })
   }),
 )
 
@@ -45,7 +46,9 @@ router.get(
     const { from, to, period } = rangeSchema.parse(req.query)
     if (from >= to) throw new HttpError(400, '`from` must be before `to`')
 
-    res.json({ series: await timeSeries({ branchIds: scopeFor(req), from, to, period }) })
+    res.json({
+      series: await timeSeries({ tenantId: tenantOf(req), branchIds: scopeFor(req), from, to, period }),
+    })
   }),
 )
 
@@ -53,7 +56,7 @@ router.get(
   '/branches',
   asyncHandler(async (req, res) => {
     const { from, to } = rangeSchema.omit({ period: true }).parse(req.query)
-    res.json({ branches: await byBranch({ branchIds: scopeFor(req), from, to }) })
+    res.json({ branches: await byBranch({ tenantId: tenantOf(req), branchIds: scopeFor(req), from, to }) })
   }),
 )
 

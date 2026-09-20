@@ -9,6 +9,7 @@ import branchRoutes from './modules/branches/branch.routes.js'
 import customerRoutes from './modules/customers/customer.routes.js'
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js'
 import pricingRoutes from './modules/pricing/pricing.routes.js'
+import platformRoutes from './modules/tenants/platform.routes.js'
 
 export function createApp() {
   const app = express()
@@ -28,6 +29,7 @@ export function createApp() {
   app.use('/api/pricing', pricingRoutes)
   app.use('/api/bookings', bookingRoutes)
   app.use('/api/dashboard', dashboardRoutes)
+  app.use('/api/platform', platformRoutes)
 
   app.use(notFound)
   app.use(errorHandler)

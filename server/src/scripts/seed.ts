@@ -1,19 +1,24 @@
 /**
- * Seeds branches, an owner account, and the price list from
- * laundry_price_list.csv. Safe to re-run: everything is upserted by natural key.
+ * Seeding for a multi-tenant deployment.
  *
- * Two entry points:
- *   - `npm run seed` runs it as a CLI against MONGODB_URI (local or remote).
- *   - `bootstrapIfEmpty()` runs it from server startup when the database has no
- *     users at all — for hosts like Render's free tier that offer no shell.
+ *   - `bootstrapIfEmpty()` runs from server startup: on an empty database it
+ *     creates ONLY the platform admin (from PLATFORM_ADMIN_* env vars). No
+ *     business is created — the admin does that through the app. This is what
+ *     Render's shell-less free tier relies on.
+ *   - `npm run seed` is a development convenience: platform admin plus a demo
+ *     business "Calidad Laundry" with an owner, HQ + Branch 1, and the 33-item
+ *     price list from laundry_price_list.csv. Idempotent.
  */
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { connectDb, disconnectDb } from '../config/db.js'
+import { env } from '../config/env.js'
 import { UserModel, hashPassword } from '../modules/auth/user.model.js'
 import { BranchModel } from '../modules/branches/branch.model.js'
 import { PriceItemModel } from '../modules/pricing/price-item.model.js'
+import { TenantModel } from '../modules/tenants/tenant.model.js'
+import { createTenantWithOwner } from '../modules/tenants/tenant.service.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const CSV_PATH = resolve(here, '../../../laundry_price_list.csv')
@@ -95,40 +100,51 @@ function toMinor(cell: string | undefined): number | null {
   return Number.isFinite(value) ? Math.round(value * 100) : null
 }
 
-/** Seeds over an already-open connection. */
-export async function runSeed(): Promise<void> {
-  const hq = await BranchModel.findOneAndUpdate(
-    { name: 'HQ' },
-    { name: 'HQ', isHeadquarters: true, active: true },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  )
-  const branch1 = await BranchModel.findOneAndUpdate(
-    { name: 'Branch 1' },
-    { name: 'Branch 1', active: true },
-    { upsert: true, new: true, setDefaultsOnInsert: true },
-  )
-  console.log(`Branches ready: ${hq.name}, ${branch1.name}`)
+const DEMO_TENANT_NAME = 'Calidad Laundry'
+const DEFAULT_PASSWORD = 'changeme123'
 
-  const ownerEmail = process.env.SEED_OWNER_EMAIL ?? 'owner@calidad.local'
-  const ownerPassword = process.env.SEED_OWNER_PASSWORD ?? 'changeme123'
-  const existingOwner = await UserModel.findOne({ email: ownerEmail })
-  if (existingOwner) {
-    console.log(`Owner already exists: ${ownerEmail}`)
+/** Creates the platform admin if that email is not already taken. */
+export async function ensurePlatformAdmin(params: {
+  email: string
+  password: string
+}): Promise<'created' | 'exists'> {
+  const email = params.email.toLowerCase()
+  if (await UserModel.exists({ email })) return 'exists'
+
+  await UserModel.create({
+    tenantId: null,
+    name: 'Platform admin',
+    email,
+    passwordHash: await hashPassword(params.password),
+    role: 'platform_admin',
+    branchIds: [],
+  })
+  return 'created'
+}
+
+/** The demo business for local development, with the CSV price list. */
+export async function seedDemoTenant(params: {
+  ownerEmail: string
+  ownerPassword: string
+}): Promise<void> {
+  let tenant = await TenantModel.findOne({ name: DEMO_TENANT_NAME })
+  if (tenant) {
+    console.log(`Demo business exists: ${DEMO_TENANT_NAME}`)
   } else {
-    await UserModel.create({
-      name: 'Owner',
-      email: ownerEmail,
-      passwordHash: await hashPassword(ownerPassword),
-      role: 'owner',
-      branchIds: [],
+    const created = await createTenantWithOwner({
+      name: DEMO_TENANT_NAME,
+      owner: { name: 'Owner', email: params.ownerEmail, password: params.ownerPassword },
     })
-    // Never echo the password: on a hosted platform this line lands in
-    // persistent, dashboard-visible logs.
-    console.log(`Owner created: ${ownerEmail}`)
-    if (!process.env.SEED_OWNER_PASSWORD) {
-      console.warn('  Using the default development password — change it before going live.')
-    }
+    tenant = created.tenant
+    console.log(`Demo business created: ${DEMO_TENANT_NAME} (owner ${params.ownerEmail})`)
   }
+  const tenantId = tenant._id
+
+  await BranchModel.findOneAndUpdate(
+    { tenantId, name: 'Branch 1' },
+    { tenantId, name: 'Branch 1', active: true },
+    { upsert: true, setDefaultsOnInsert: true },
+  )
 
   const rows = parseCsv(readFileSync(CSV_PATH, 'utf8')).filter((row) => row.name)
   let seeded = 0
@@ -138,8 +154,9 @@ export async function runSeed(): Promise<void> {
       continue
     }
     await PriceItemModel.findOneAndUpdate(
-      { name: row.name, branchId: null },
+      { tenantId, name: row.name, branchId: null },
       {
+        tenantId,
         name: row.name,
         branchId: null,
         category: categoryFor(row.name),
@@ -152,27 +169,45 @@ export async function runSeed(): Promise<void> {
     )
     seeded++
   }
-  console.log(`Price list seeded: ${seeded} items`)
+  console.log(`Price list seeded for ${DEMO_TENANT_NAME}: ${seeded} items`)
+}
+
+/** Development seed over an already-open connection. Never logs a password. */
+export async function runSeed(): Promise<void> {
+  const adminEmail = env.PLATFORM_ADMIN_EMAIL ?? 'admin@calidad.local'
+  const adminPassword = env.PLATFORM_ADMIN_PASSWORD ?? DEFAULT_PASSWORD
+  const result = await ensurePlatformAdmin({ email: adminEmail, password: adminPassword })
+  console.log(`Platform admin ${result}: ${adminEmail}`)
+
+  await seedDemoTenant({
+    ownerEmail: process.env.SEED_OWNER_EMAIL ?? 'owner@calidad.local',
+    ownerPassword: process.env.SEED_OWNER_PASSWORD ?? DEFAULT_PASSWORD,
+  })
+
+  if (!env.PLATFORM_ADMIN_PASSWORD || !process.env.SEED_OWNER_PASSWORD) {
+    console.warn('Default development passwords are in use — never seed production this way.')
+  }
 }
 
 /**
- * First-boot bootstrap. Only acts when there are no users at all, so it can
- * never touch a live database, and only when the owner credentials are set,
- * so the default password never appears in production by accident.
+ * First-boot bootstrap. Acts only when there are no users at all, so it can
+ * never touch a live database, and only when the platform admin credentials
+ * are set, so the default password never reaches production by accident.
  */
 export async function bootstrapIfEmpty(): Promise<void> {
   if ((await UserModel.estimatedDocumentCount()) > 0) return
 
-  if (!process.env.SEED_OWNER_EMAIL || !process.env.SEED_OWNER_PASSWORD) {
+  if (!env.PLATFORM_ADMIN_EMAIL || !env.PLATFORM_ADMIN_PASSWORD) {
     console.warn(
-      'Database is empty but SEED_OWNER_EMAIL / SEED_OWNER_PASSWORD are not set — ' +
-        'skipping bootstrap. Set them and restart, or run `npm run seed`.',
+      'Database is empty but PLATFORM_ADMIN_EMAIL / PLATFORM_ADMIN_PASSWORD are not set — ' +
+        'skipping bootstrap. Set them and restart, or run `npm run seed` for a dev database.',
     )
     return
   }
 
-  console.log('Empty database — running first-boot seed')
-  await runSeed()
+  console.log('Empty database — creating the platform admin')
+  await ensurePlatformAdmin({ email: env.PLATFORM_ADMIN_EMAIL, password: env.PLATFORM_ADMIN_PASSWORD })
+  console.log(`Platform admin created: ${env.PLATFORM_ADMIN_EMAIL}`)
 }
 
 // CLI entry: `npm run seed` / `tsx src/scripts/seed.ts`.
