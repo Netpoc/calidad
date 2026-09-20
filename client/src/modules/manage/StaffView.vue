@@ -49,6 +49,7 @@ const roleOptions = computed(() =>
 const needsBranches = computed(() => form.role === 'staff' || form.role === 'manager')
 
 const ROLE_STYLES: Record<Role, string> = {
+  platform_admin: 'bg-slate-900 text-white',
   owner: 'bg-violet-100 text-violet-800',
   manager: 'bg-blue-100 text-blue-800',
   staff: 'bg-green-100 text-green-800',

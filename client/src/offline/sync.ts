@@ -1,5 +1,6 @@
 import { http } from '@/api/http'
 import { db, type QueuedBooking } from './db'
+import { ownOutbox } from './session'
 
 export interface SyncResult {
   clientRequestId: string
@@ -23,12 +24,17 @@ let running = false
  * item, a tier that is not offered); retrying it unchanged will never succeed,
  * so it is kept for a human to resolve rather than retried forever.
  */
-export async function flushOutbox(): Promise<SyncResult[]> {
-  if (running || !navigator.onLine) return []
+export async function flushOutbox(tenantId: string | null): Promise<SyncResult[]> {
+  // Only this business's entries. A booking queued under another business
+  // waits on this device until that business signs in again — sending it now
+  // would file it under the wrong business.
+  if (running || !navigator.onLine || !tenantId) return []
   running = true
 
   try {
-    const pending = await db.outbox.where('status').anyOf('queued', 'failed').toArray()
+    const pending = await ownOutbox(tenantId)
+      .and((entry) => entry.status === 'queued' || entry.status === 'failed')
+      .toArray()
     if (pending.length === 0) return []
 
     // Only retry `failed` entries that have not exhausted their attempts.
@@ -84,10 +90,17 @@ function toPayload(entry: QueuedBooking) {
   }
 }
 
-/** Flush when the browser regains connectivity, and once on startup. */
-export function startSyncWatcher(onFlush?: (results: SyncResult[]) => void): () => void {
+/**
+ * Flush when the browser regains connectivity, and once on startup. The
+ * tenant is read at each run, not captured, because the signed-in business
+ * can change without a page reload.
+ */
+export function startSyncWatcher(
+  currentTenant: () => string | null,
+  onFlush?: (results: SyncResult[]) => void,
+): () => void {
   const run = async () => {
-    const results = await flushOutbox()
+    const results = await flushOutbox(currentTenant())
     if (results.length && onFlush) onFlush(results)
   }
 
@@ -95,7 +108,8 @@ export function startSyncWatcher(onFlush?: (results: SyncResult[]) => void): () 
   // The `online` event is optimistic — it fires when the OS sees an interface,
   // not when the API is reachable — so also poll while there is work queued.
   const timer = window.setInterval(async () => {
-    if (navigator.onLine && (await db.outbox.count()) > 0) await run()
+    const tenantId = currentTenant()
+    if (navigator.onLine && tenantId && (await ownOutbox(tenantId).count()) > 0) await run()
   }, 30_000)
 
   void run()

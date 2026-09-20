@@ -32,7 +32,7 @@ async function submit() {
   try {
     await auth.login(form.email, form.password)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/book'
-    await router.push(redirect)
+    await router.push(auth.isPlatformAdmin ? '/platform' : redirect)
   } catch (e) {
     formError.value = errorMessage(e)
   }

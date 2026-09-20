@@ -1,9 +1,8 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { http, setAuthToken, getAuthToken } from '@/api/http'
-import type { AuthUser, Role } from '@/api/types'
-
-const ROLE_RANK: Record<Role, number> = { owner: 3, manager: 2, staff: 1, customer: 0 }
+import { ROLE_RANK, type AuthUser, type Role } from '@/api/types'
+import { clearTenantCaches, switchSession } from '@/offline/session'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<AuthUser | null>(null)
@@ -16,17 +15,27 @@ export const useAuthStore = defineStore('auth', () => {
 
   const canSeeDashboard = atLeast('manager')
   const isOwner = computed(() => user.value?.role === 'owner')
+  const isPlatformAdmin = computed(() => user.value?.role === 'platform_admin')
+
+  /** Queued bookings on this device that belong to a different business. */
+  const foreignQueued = ref(0)
 
   async function login(email: string, password: string): Promise<void> {
     loading.value = true
     try {
-      const { data } = await http.post<{ token: string; user: AuthUser }>('/auth/login', {
-        email,
-        password,
-      })
+      const { data } = await http.post<{
+        token: string
+        user: Omit<AuthUser, 'tenantName'>
+        tenant: { id: string; name: string } | null
+      }>('/auth/login', { email, password })
+
+      // A different business on the same phone must never see the previous
+      // one's cached prices — clear before the new session becomes visible.
+      foreignQueued.value = await switchSession(data.tenant?.id ?? null)
+
       setAuthToken(data.token)
-      user.value = data.user
-      localStorage.setItem('calidad.user', JSON.stringify(data.user))
+      user.value = { ...data.user, tenantId: data.tenant?.id ?? null, tenantName: data.tenant?.name ?? null }
+      localStorage.setItem('calidad.user', JSON.stringify(user.value))
     } finally {
       loading.value = false
     }
@@ -53,7 +62,20 @@ export const useAuthStore = defineStore('auth', () => {
     setAuthToken(null)
     localStorage.removeItem('calidad.user')
     user.value = null
+    // Caches go; the outbox stays — unsynced bookings must survive a logout.
+    void clearTenantCaches()
   }
 
-  return { user, loading, isAuthenticated, canSeeDashboard, isOwner, login, restore, logout }
+  return {
+    user,
+    loading,
+    isAuthenticated,
+    canSeeDashboard,
+    isOwner,
+    isPlatformAdmin,
+    foreignQueued,
+    login,
+    restore,
+    logout,
+  }
 })

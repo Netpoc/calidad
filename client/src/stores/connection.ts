@@ -1,8 +1,9 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { http } from '@/api/http'
-import { db } from '@/offline/db'
+import { ownOutbox } from '@/offline/session'
 import { flushOutbox, type SyncResult } from '@/offline/sync'
+import { useAuthStore } from './auth'
 
 /**
  * Tracks whether the API is actually reachable, not merely whether the OS
@@ -10,6 +11,7 @@ import { flushOutbox, type SyncResult } from '@/offline/sync'
  * `navigator.onLine === true` while every request fails.
  */
 export const useConnectionStore = defineStore('connection', () => {
+  const auth = useAuthStore()
   const browserOnline = ref(navigator.onLine)
   const apiReachable = ref(navigator.onLine)
   const queuedCount = ref(0)
@@ -22,8 +24,9 @@ export const useConnectionStore = defineStore('connection', () => {
     return isOnline.value ? 'online' : 'offline'
   })
 
+  /** Only this business's queue — another business's work is not "to sync" here. */
   async function refreshQueueCount(): Promise<void> {
-    queuedCount.value = await db.outbox.count()
+    queuedCount.value = await ownOutbox(auth.user?.tenantId ?? null).count()
   }
 
   async function probe(): Promise<boolean> {
@@ -68,7 +71,7 @@ export const useConnectionStore = defineStore('connection', () => {
     if (!(await probe())) return []
     syncing.value = true
     try {
-      const results = await flushOutbox()
+      const results = await flushOutbox(auth.user?.tenantId ?? null)
       lastSyncAt.value = new Date()
       await refreshQueueCount()
       return results

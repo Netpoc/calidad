@@ -1,6 +1,15 @@
 /** Mirrors server/src/shared/domain.ts — keep the two in step. */
 
-export type Role = 'owner' | 'manager' | 'staff' | 'customer'
+export type Role = 'platform_admin' | 'owner' | 'manager' | 'staff' | 'customer'
+
+/** Single source of truth — the router and auth store both import this. */
+export const ROLE_RANK: Record<Role, number> = {
+  platform_admin: 4,
+  owner: 3,
+  manager: 2,
+  staff: 1,
+  customer: 0,
+}
 export type ServiceTier = 'wash_starch_iron' | 'starch_iron'
 export type BookingStatus =
   | 'received'
@@ -29,6 +38,17 @@ export interface AuthUser {
   email: string
   role: Role
   branchIds: string[]
+  /** Null only for the platform admin, who belongs to no business. */
+  tenantId: string | null
+  tenantName: string | null
+}
+
+export interface TenantSummary {
+  id: string
+  name: string
+  active: boolean
+  createdAt: string
+  counts: { users: number; branches: number; bookings: number }
 }
 
 export interface Branch {

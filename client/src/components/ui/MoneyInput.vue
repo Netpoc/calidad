@@ -41,7 +41,7 @@ function onInput(event: Event) {
     <label :for="id" class="mb-1 block text-sm font-medium text-slate-700">{{ label }}</label>
     <div class="relative">
       <span
-        class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-slate-400"
+        class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base font-semibold text-slate-600"
         aria-hidden="true"
       >
         ₦

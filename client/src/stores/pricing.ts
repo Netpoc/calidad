@@ -3,6 +3,8 @@ import { computed, ref } from 'vue'
 import { http } from '@/api/http'
 import type { PriceItem, ServiceTier } from '@/api/types'
 import { db, getMeta, setMeta } from '@/offline/db'
+import { PRICING_TENANT_KEY } from '@/offline/session'
+import { useAuthStore } from './auth'
 
 /**
  * The price list is the one dataset staff cannot book without, so it is cached
@@ -10,6 +12,7 @@ import { db, getMeta, setMeta } from '@/offline/db'
  * background; failure is silent, because a stale list still lets work continue.
  */
 export const usePricingStore = defineStore('pricing', () => {
+  const auth = useAuthStore()
   const items = ref<PriceItem[]>([])
   const lastFetchedAt = ref<Date | null>(null)
   const loading = ref(false)
@@ -39,6 +42,10 @@ export const usePricingStore = defineStore('pricing', () => {
   }
 
   async function loadFromCache(): Promise<void> {
+    // A cache tagged with another business is stale by definition.
+    const cachedFor = await getMeta<string>(PRICING_TENANT_KEY)
+    if (cachedFor && cachedFor !== auth.user?.tenantId) return
+
     const cached = await db.priceItems.toArray()
     if (cached.length) {
       items.value = cached
@@ -58,6 +65,7 @@ export const usePricingStore = defineStore('pricing', () => {
       await db.priceItems.clear()
       await db.priceItems.bulkPut(data.items.map((item) => ({ ...item, cachedAt: now })))
       await setMeta('pricing.fetchedAt', now)
+      await setMeta(PRICING_TENANT_KEY, auth.user?.tenantId ?? '')
       lastFetchedAt.value = new Date(now)
     } catch {
       // Offline or server down — the cached list stands.

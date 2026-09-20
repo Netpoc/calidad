@@ -5,6 +5,7 @@ import type { Booking, ServiceTier } from '@/api/types'
 import { db } from '@/offline/db'
 import { usePricingStore } from './pricing'
 import { useConnectionStore } from './connection'
+import { useAuthStore } from './auth'
 
 export interface DraftLine {
   priceItemId: string
@@ -34,6 +35,7 @@ function newRequestId(): string {
 export const useBookingStore = defineStore('booking', () => {
   const pricing = usePricingStore()
   const connection = useConnectionStore()
+  const auth = useAuthStore()
 
   const lines = ref<DraftLine[]>([])
   const customer = ref({ name: '', phone: '', email: '', address: '' })
@@ -95,6 +97,8 @@ export const useBookingStore = defineStore('booking', () => {
     if (!customer.value.name.trim() || !customer.value.phone.trim()) {
       throw new Error("Enter the customer's name and phone number")
     }
+    const tenantId = auth.user?.tenantId
+    if (!tenantId) throw new Error('Sign in to a business to book laundry')
 
     submitting.value = true
     const clientRequestId = newRequestId()
@@ -139,6 +143,7 @@ export const useBookingStore = defineStore('booking', () => {
       const reference = provisionalReference()
       await db.outbox.put({
         ...payload,
+        tenantId,
         provisionalTotalMinor: totalMinor.value,
         provisionalReference: reference,
         createdAt: Date.now(),

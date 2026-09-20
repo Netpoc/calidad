@@ -1,13 +1,15 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { getAuthToken } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
-import type { Role } from '@/api/types'
+import { ROLE_RANK, type Role } from '@/api/types'
 
 declare module 'vue-router' {
   interface RouteMeta {
     public?: boolean
     /** Minimum role. The server enforces this too — this only hides the view. */
     minRole?: Role
+    /** Platform-admin screens: the only place a platform admin may go. */
+    platform?: boolean
   }
 }
 
@@ -64,6 +66,12 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/manage/StaffView.vue'),
         meta: { minRole: 'manager' },
       },
+      {
+        path: 'platform',
+        name: 'platform',
+        component: () => import('@/modules/platform/PlatformView.vue'),
+        meta: { platform: true, minRole: 'platform_admin' },
+      },
     ],
   },
   { path: '/:pathMatch(.*)*', redirect: '/book' },
@@ -74,8 +82,6 @@ export const router = createRouter({
   routes,
 })
 
-const ROLE_RANK: Record<Role, number> = { owner: 3, manager: 2, staff: 1, customer: 0 }
-
 router.beforeEach((to) => {
   if (to.meta.public) return true
 
@@ -83,6 +89,12 @@ router.beforeEach((to) => {
   if (!auth.user) auth.restore()
 
   if (!getAuthToken()) return { name: 'login', query: { redirect: to.fullPath } }
+
+  // A platform admin has no business to book for; a business user has no
+  // reason to see the platform screen. Each is sent to their own home.
+  const isPlatform = auth.user?.role === 'platform_admin'
+  if (isPlatform && !to.meta.platform) return { name: 'platform' }
+  if (!isPlatform && to.meta.platform) return { name: 'book' }
 
   if (to.meta.minRole && auth.user) {
     if (ROLE_RANK[auth.user.role] < ROLE_RANK[to.meta.minRole]) return { name: 'book' }

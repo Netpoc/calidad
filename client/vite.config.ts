@@ -44,11 +44,15 @@ export default defineConfig(({ mode }) => {
           globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
           runtimeCaching: [
             {
-              // The price list must be readable offline to book laundry, so serve
-              // it from cache first and refresh in the background.
+              // The price list must be readable offline, but the owner edits it
+              // and must see the edit at once. NetworkFirst gives both: a live
+              // response when online, the cached copy when not. (StaleWhile-
+              // Revalidate served the pre-edit list back after every save.)
+              // Instant display is the Dexie cache's job (stores/pricing.ts),
+              // so the network wait here only delays the background refresh.
               urlPattern: /\/api\/pricing/,
-              handler: 'StaleWhileRevalidate',
-              options: { cacheName: 'pricing' },
+              handler: 'NetworkFirst',
+              options: { cacheName: 'pricing', networkTimeoutSeconds: 5 },
             },
             {
               // Reads may be stale offline; writes are never cached — they go to

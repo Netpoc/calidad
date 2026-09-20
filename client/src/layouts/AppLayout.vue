@@ -16,6 +16,10 @@ const router = useRouter()
  * the counter work staff do all day.
  */
 const navItems = computed(() => {
+  // The platform admin sees only the businesses screen — nothing inside one.
+  if (auth.isPlatformAdmin) {
+    return [{ key: 'platform', label: 'Businesses', icon: 'building' as IconName, match: '/platform' }]
+  }
   const items: Array<{ key: string; label: string; icon: IconName; match: string }> = [
     { key: 'book', label: 'Book', icon: 'plus-circle', match: '/book' },
     { key: 'bookings', label: 'Bookings', icon: 'list', match: '/bookings' },
@@ -45,9 +49,11 @@ function logout() {
     <header class="sticky top-0 z-30 bg-brand-700 px-4 py-3 text-white">
       <div class="mx-auto flex max-w-3xl items-center justify-between gap-3">
         <div class="min-w-0">
-          <h1 class="m-0 truncate text-base font-bold">Calidad Laundry</h1>
+          <h1 class="m-0 truncate text-base font-bold">
+            {{ auth.user?.tenantName ?? 'Platform admin' }}
+          </h1>
           <p class="m-0 truncate text-xs capitalize text-brand-100">
-            {{ auth.user?.name }} · {{ auth.user?.role }}
+            {{ auth.user?.name }} · {{ auth.user?.role?.replace('_', ' ') }}
           </p>
         </div>
         <div class="flex shrink-0 items-center gap-2">

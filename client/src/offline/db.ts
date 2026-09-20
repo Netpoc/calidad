@@ -6,6 +6,12 @@ export interface QueuedBooking {
   /** Idempotency key. Generated once, reused on every retry — this is what
    *  stops a flaky connection from creating duplicate bookings and SMS. */
   clientRequestId: string
+  /**
+   * The business this booking was taken for. Sync sends only the current
+   * business's entries: a booking queued under business A must never be
+   * replayed with business B's token, which would file it under B.
+   */
+  tenantId: string
   branchId: string
   customer: { name: string; phone: string; email?: string; address?: string }
   items: Array<{ priceItemId: string; tier: string; quantity: number }>
@@ -38,6 +44,22 @@ class CalidadDb extends Dexie {
       priceItems: '_id, name',
       meta: 'key',
     })
+    // v2: outbox entries carry and are indexed by tenantId. Entries from
+    // before have no business and stay quarantined — never sent, never lost.
+    this.version(2)
+      .stores({
+        outbox: 'clientRequestId, status, createdAt, tenantId',
+        priceItems: '_id, name',
+        meta: 'key',
+      })
+      .upgrade((tx) =>
+        tx
+          .table('outbox')
+          .toCollection()
+          .modify((entry: Partial<QueuedBooking>) => {
+            entry.tenantId ??= ''
+          }),
+      )
   }
 }
 

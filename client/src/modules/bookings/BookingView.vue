@@ -13,11 +13,13 @@ import { useToast } from '@/composables/useToast'
 import { categoryMeta } from '@/api/display'
 import type { Branch, Customer, PriceItem, ServiceTier } from '@/api/types'
 import { formatNaira, plural } from '@/composables/useMoney'
+import { useAuthStore } from '@/stores/auth'
 import { useBookingStore } from '@/stores/booking'
 import { useConnectionStore } from '@/stores/connection'
 import { usePricingStore } from '@/stores/pricing'
 
 const toast = useToast()
+const auth = useAuthStore()
 const booking = useBookingStore()
 const pricing = usePricingStore()
 const connection = useConnectionStore()
@@ -250,10 +252,23 @@ const branchOptions = computed(() =>
       </div>
 
       <EmptyState
-        v-if="pricing.sorted.length === 0"
+        v-if="pricing.sorted.length === 0 && !pricing.loading && auth.isOwner"
         icon="tag"
-        title="Price list not loaded yet"
-        hint="Connect once to download prices — after that it works offline."
+        title="No prices yet"
+        hint="Add items to the price list before booking laundry."
+      >
+        <router-link
+          to="/pricing"
+          class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-brand-700 px-4 font-semibold text-white no-underline"
+        >
+          <AppIcon name="tag" /> Set up the price list
+        </router-link>
+      </EmptyState>
+      <EmptyState
+        v-else-if="pricing.sorted.length === 0"
+        icon="tag"
+        title="Price list not available"
+        hint="Ask the owner to add items, or connect once to download the list — after that it works offline."
       />
       <p v-else-if="filteredItems.length === 0" class="py-6 text-center text-sm text-slate-500">
         No items match “{{ search }}”

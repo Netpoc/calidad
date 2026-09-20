@@ -9,13 +9,18 @@ import { BOOKING_STATUS_META, PAYMENT_STATUS_META } from '@/api/display'
 import StatusPill from '@/components/StatusPill.vue'
 import type { Booking, BookingStatus, Customer } from '@/api/types'
 import { formatNaira, plural } from '@/composables/useMoney'
-import { db, type QueuedBooking } from '@/offline/db'
+import type { QueuedBooking } from '@/offline/db'
+import { foreignOutboxCount, ownOutbox } from '@/offline/session'
+import { useAuthStore } from '@/stores/auth'
 import { useConnectionStore } from '@/stores/connection'
 
 const toast = useToast()
+const auth = useAuthStore()
 const connection = useConnectionStore()
 const bookings = ref<Booking[]>([])
 const queued = ref<QueuedBooking[]>([])
+/** Bookings on this device that belong to a different business. */
+const foreign = ref(0)
 const loading = ref(false)
 const filter = ref<BookingStatus | 'all'>('all')
 
@@ -44,7 +49,9 @@ function customerOf(booking: Booking): Customer | null {
 
 async function load() {
   loading.value = true
-  queued.value = await db.outbox.toArray()
+  const tenantId = auth.user?.tenantId ?? null
+  queued.value = await ownOutbox(tenantId).toArray()
+  foreign.value = await foreignOutboxCount(tenantId)
   try {
     const { data } = await http.get<{ bookings: Booking[] }>('/bookings', {
       params: { limit: 50 },
@@ -117,6 +124,12 @@ onMounted(load)
         </span>
       </div>
     </section>
+
+    <!-- Never silently drop another business's queued work; say it is here. -->
+    <p v-if="foreign > 0" class="m-0 rounded-xl bg-slate-100 px-3 py-2 text-xs text-slate-600">
+      {{ plural(foreign, 'booking') }} from another business {{ foreign === 1 ? 'is' : 'are' }}
+      waiting on this device for that business to sign in.
+    </p>
 
     <div class="flex gap-2 overflow-x-auto pb-1">
       <button
