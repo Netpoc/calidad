@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "seed": "tsx src/scripts/seed.ts",
     "migrate:tenants": "tsx src/scripts/migrate-to-tenants.ts",
+    "migrate:payments": "tsx src/scripts/migrate-payments.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src"

@@ -7,6 +7,8 @@ const props = defineProps<{
   title: string
   tone?: 'success' | 'default'
   confirmLabel?: string
+  /** Forms read better left-aligned; short confirmations stay centred. */
+  align?: 'center' | 'left'
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -46,7 +48,7 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
         role="dialog"
         aria-modal="true"
         :aria-label="title"
-        class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+        class="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
       >
         <div
           v-if="tone === 'success'"
@@ -55,9 +57,23 @@ onUnmounted(() => document.removeEventListener('keydown', onKeydown))
         >
           ✓
         </div>
-        <h2 class="m-0 text-center text-lg font-bold text-slate-900">{{ title }}</h2>
-        <div class="mt-2 text-center text-sm text-slate-600"><slot /></div>
-        <BaseButton block class="mt-5" @click="emit('close')">
+        <h2
+          class="m-0 text-lg font-bold text-slate-900"
+          :class="align === 'left' ? 'text-left' : 'text-center'"
+        >
+          {{ title }}
+        </h2>
+        <div
+          class="mt-2 text-sm text-slate-600"
+          :class="align === 'left' ? 'text-left' : 'text-center'"
+        >
+          <slot />
+        </div>
+        <!-- A dialog that does work supplies its own buttons; otherwise one dismisses it. -->
+        <div v-if="$slots.actions" class="mt-5 flex flex-col gap-2">
+          <slot name="actions" />
+        </div>
+        <BaseButton v-else block class="mt-5" @click="emit('close')">
           {{ confirmLabel ?? 'Done' }}
         </BaseButton>
       </div>

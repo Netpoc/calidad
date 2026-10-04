@@ -26,6 +26,7 @@ const navItems = computed(() => {
   ]
   if (auth.canSeeDashboard) {
     items.push({ key: 'dashboard', label: 'Revenue', icon: 'gauge', match: '/dashboard' })
+    items.push({ key: 'payments', label: 'Till', icon: 'banknotes', match: '/payments' })
     items.push({ key: 'manage', label: 'Manage', icon: 'cog', match: '/manage' })
   }
   return items

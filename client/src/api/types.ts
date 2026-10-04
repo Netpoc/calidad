@@ -19,6 +19,14 @@ export type BookingStatus =
   | 'cancelled'
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid'
 
+/** Modes staff may choose. `unrecorded` only appears on migrated history. */
+export const PAYMENT_METHODS = ['cash', 'transfer', 'pos'] as const
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
+export type LedgerMethod = PaymentMethod | 'unrecorded'
+export type LedgerKind = 'payment' | 'refund'
+/** Set by the server: `deposit` leaves a balance, `balance` clears it. */
+export type PaymentStage = 'deposit' | 'balance' | 'refund'
+
 export const SERVICE_TIER_LABELS: Record<ServiceTier, string> = {
   wash_starch_iron: 'Wash, Starch & Iron',
   starch_iron: 'Starch & Iron',
@@ -87,11 +95,33 @@ export interface BookingItem {
   lineTotalMinor: number
 }
 
+/** A user id, or the `{ _id, name }` the detail endpoint populates it to. */
+export type UserRef = string | { _id: string; name: string; role?: Role }
+
+/** One movement of money. Append-only on the server. */
+export interface LedgerEntry {
+  _id: string
+  kind: LedgerKind
+  amountMinor: number
+  method: LedgerMethod
+  stage: PaymentStage
+  at: string
+  byUserId: UserRef
+  note?: string
+}
+
+export interface StatusEvent {
+  status: BookingStatus
+  at: string
+  byUserId?: UserRef
+}
+
 export interface Booking {
   _id: string
   referenceCode: string
   branchId: string | Branch
   customerId: string | Customer
+  createdByUserId?: UserRef
   items: BookingItem[]
   subtotalMinor: number
   discountMinor: number
@@ -99,13 +129,79 @@ export interface Booking {
   paidMinor: number
   paymentStatus: PaymentStatus
   status: BookingStatus
+  statusHistory: StatusEvent[]
+  payments: LedgerEntry[]
+  collectedAt?: string
+  collectedByUserId?: UserRef
+  cancelledByUserId?: UserRef
   createdAt: string
 }
 
-export interface RevenueSummary {
+/**
+ * Billed is dated by booking; collected by when the money changed hands, so
+ * "collected today" matches the cash drawer.
+ */
+export interface PeriodRevenue {
   billedMinor: number
-  collectedMinor: number
-  pendingMinor: number
   bookingCount: number
+  /** Net cash in: payments minus refunds. */
+  collectedMinor: number
+  refundedMinor: number
+  byMethod: Record<LedgerMethod, number>
+}
+
+/** Owed right now — not tied to a period. */
+export interface Outstanding {
+  outstandingMinor: number
+  owingBookingCount: number
   awaitingCollectionCount: number
+  awaitingCollectionBalanceMinor: number
+}
+
+export interface RevenueHeadline {
+  day: PeriodRevenue
+  month: PeriodRevenue
+  year: PeriodRevenue
+  outstanding: Outstanding
+}
+
+export type BranchRevenue = PeriodRevenue & Outstanding & { branchId: string; branchName: string }
+
+export interface TillEntry {
+  entryId: string
+  bookingId: string
+  referenceCode: string
+  customerName: string
+  branchName: string
+  kind: LedgerKind
+  amountMinor: number
+  method: LedgerMethod
+  stage: PaymentStage
+  at: string
+  byUserId: string
+  byUserName: string
+  note?: string
+}
+
+export interface TillHandover {
+  bookingId: string
+  referenceCode: string
+  customerName: string
+  branchName: string
+  totalMinor: number
+  collectedAt: string
+  byUserId: string
+  byUserName: string
+}
+
+export interface TillReport {
+  entries: TillEntry[]
+  handovers: TillHandover[]
+  totals: {
+    inMinor: number
+    refundedMinor: number
+    netMinor: number
+    byMethod: Record<LedgerMethod, number>
+    byUser: Array<{ userId: string; name: string; netMinor: number; byMethod: Record<LedgerMethod, number> }>
+  }
 }

@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie'
-import type { PriceItem } from '@/api/types'
+import type { PaymentMethod, PriceItem } from '@/api/types'
 
 /** A booking captured on the device, waiting to reach the server. */
 export interface QueuedBooking {
@@ -17,6 +17,10 @@ export interface QueuedBooking {
   items: Array<{ priceItemId: string; tier: string; quantity: number }>
   discountMinor?: number
   paidMinor?: number
+  /** Absent on entries queued before payment modes existed; the server books those as unrecorded. */
+  paymentMethod?: PaymentMethod
+  /** ISO time the money was taken on the device. */
+  takenAt?: string
   /** Computed on-device for the receipt; the server total is authoritative. */
   provisionalTotalMinor: number
   /** Shown on the ticket until the server issues the real reference code. */

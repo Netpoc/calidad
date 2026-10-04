@@ -3,7 +3,7 @@ import { Types } from 'mongoose'
 import { BranchModel } from '../modules/branches/branch.model.js'
 import { TenantModel } from '../modules/tenants/tenant.model.js'
 import { HttpError } from '../shared/http-error.js'
-import { resolveBranchScope, type AuthPrincipal } from './auth.js'
+import { readableBranchIds, resolveBranchScope, type AuthPrincipal } from './auth.js'
 
 /** An AuthPrincipal that has passed requireTenant: tenantId is guaranteed. */
 export interface TenantPrincipal extends AuthPrincipal {
@@ -60,6 +60,23 @@ export function tenantOf(req: Request): string {
   const tenantId = req.auth?.tenantId
   if (!tenantId) throw new HttpError(403, 'This account is not attached to a business')
   return tenantId
+}
+
+/**
+ * Narrows the caller's readable scope by an optional `?branchId` filter, for
+ * reports. An owner may look at any branch (the tenant filter in the query
+ * keeps it inside their business); a manager only within their own.
+ */
+export function readScopeFor(req: Request): string[] | null {
+  const requested = typeof req.query.branchId === 'string' ? req.query.branchId : null
+  const scope = readableBranchIds(req.auth!)
+
+  if (!requested) return scope
+  if (!Types.ObjectId.isValid(requested)) throw new HttpError(400, 'Invalid branch id')
+  if (scope !== null && !scope.includes(requested)) {
+    throw new HttpError(403, 'Branch outside your assigned scope')
+  }
+  return [requested]
 }
 
 /**

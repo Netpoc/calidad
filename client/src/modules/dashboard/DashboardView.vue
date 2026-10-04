@@ -4,15 +4,16 @@ import { http } from '@/api/http'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AlertBox from '@/components/ui/AlertBox.vue'
 import StatCard from '@/components/StatCard.vue'
-import type { RevenueSummary } from '@/api/types'
+import { PAYMENT_METHOD_META } from '@/api/display'
+import type { BranchRevenue, LedgerMethod, PeriodRevenue, RevenueHeadline } from '@/api/types'
 import { formatNaira, plural } from '@/composables/useMoney'
 import { useConnectionStore } from '@/stores/connection'
 
 type Period = 'day' | 'month' | 'year'
 
 const connection = useConnectionStore()
-const summary = ref<Record<Period, RevenueSummary> | null>(null)
-const byBranch = ref<Array<RevenueSummary & { branchId: string; branchName: string }>>([])
+const summary = ref<RevenueHeadline | null>(null)
+const byBranch = ref<BranchRevenue[]>([])
 const loading = ref(false)
 const lastUpdated = ref<Date | null>(null)
 const period = ref<Period>('day')
@@ -23,13 +24,27 @@ const PERIOD_LABELS: Record<Period, string> = {
   year: 'This year',
 }
 
-const current = computed<RevenueSummary | null>(() => summary.value?.[period.value] ?? null)
+const current = computed<PeriodRevenue | null>(() => summary.value?.[period.value] ?? null)
+const outstanding = computed(() => summary.value?.outstanding ?? null)
 
-/** Share of billed money actually in hand — the number a manager acts on. */
-const collectedPct = computed(() => {
+/** Modes with money against them, in a fixed order so the bar never reshuffles. */
+const METHOD_BAR: Record<LedgerMethod, string> = {
+  cash: 'bg-green-600',
+  transfer: 'bg-blue-600',
+  pos: 'bg-violet-600',
+  unrecorded: 'bg-slate-400',
+}
+const methodSplit = computed(() => {
   const row = current.value
-  if (!row || row.billedMinor === 0) return 0
-  return Math.round((row.collectedMinor / row.billedMinor) * 100)
+  if (!row) return []
+  const total = row.collectedMinor
+  return (Object.keys(METHOD_BAR) as LedgerMethod[])
+    .filter((m) => row.byMethod[m] !== 0)
+    .map((m) => ({
+      method: m,
+      amountMinor: row.byMethod[m],
+      pct: total > 0 ? Math.max(0, Math.round((row.byMethod[m] / total) * 100)) : 0,
+    }))
 })
 
 async function load() {
@@ -38,8 +53,8 @@ async function load() {
   try {
     const startOfYear = new Date(new Date().getFullYear(), 0, 1).toISOString()
     const [summaryRes, branchRes] = await Promise.all([
-      http.get<{ summary: Record<Period, RevenueSummary> }>('/dashboard/summary'),
-      http.get<{ branches: typeof byBranch.value }>('/dashboard/branches', {
+      http.get<{ summary: RevenueHeadline }>('/dashboard/summary'),
+      http.get<{ branches: BranchRevenue[] }>('/dashboard/branches', {
         params: { from: startOfYear, to: new Date().toISOString() },
       }),
     ])
@@ -98,50 +113,73 @@ onUnmounted(() => window.clearInterval(timer))
         icon="bank"
         :loading="loading && !summary"
         :value="formatNaira(current?.billedMinor ?? 0)"
-        :caption="plural(current?.bookingCount ?? 0, 'booking')"
+        :caption="`${plural(current?.bookingCount ?? 0, 'booking')} taken in`"
       />
       <StatCard
-        label="Collected"
+        label="Cash received"
         tone="collected"
-        icon="check-circle"
+        icon="banknotes"
         :loading="loading && !summary"
         :value="formatNaira(current?.collectedMinor ?? 0)"
-        :caption="`${collectedPct}% of billed`"
+        :caption="
+          current?.refundedMinor
+            ? `After ${formatNaira(current.refundedMinor)} refunded`
+            : 'Deposits and balances taken'
+        "
       />
       <StatCard
-        label="Pending"
+        label="Outstanding"
         tone="pending"
         icon="clock"
         :loading="loading && !summary"
-        :value="formatNaira(current?.pendingMinor ?? 0)"
-        caption="Owed by customers"
+        :value="formatNaira(outstanding?.outstandingMinor ?? 0)"
+        :caption="`Owed now on ${plural(outstanding?.owingBookingCount ?? 0, 'booking')}`"
       />
     </div>
 
-    <!-- Collected vs pending as one bar: the split is easier to judge than two
-         numbers, and the figures stay underneath for the exact values. -->
+    <!-- How the money came in. Each segment is named with its amount below,
+         so the colours are a shortcut, never the only signal. -->
     <div class="rounded-xl border border-slate-200 bg-white p-4">
-      <h2 class="m-0 mb-3 text-sm font-bold text-slate-900">
-        Collection rate — {{ PERIOD_LABELS[period].toLowerCase() }}
-      </h2>
-      <div
-        class="flex h-3 overflow-hidden rounded-full bg-slate-100"
-        role="img"
-        :aria-label="`${collectedPct} percent of billed revenue collected`"
-      >
-        <div class="bg-green-600" :style="{ width: `${collectedPct}%` }" />
-        <div class="flex-1 bg-amber-500" />
+      <div class="mb-3 flex items-center justify-between gap-2">
+        <h2 class="m-0 text-sm font-bold text-slate-900">
+          Received by mode — {{ PERIOD_LABELS[period].toLowerCase() }}
+        </h2>
+        <router-link
+          :to="{ name: 'payments' }"
+          class="flex min-h-tap items-center gap-1 text-sm font-semibold text-brand-700 no-underline"
+        >
+          Till report <AppIcon name="chevron-right" />
+        </router-link>
       </div>
-      <div class="mt-2 flex justify-between text-xs">
-        <span class="flex items-center gap-1.5 font-medium text-green-700">
-          <span class="h-2 w-2 rounded-full bg-green-600" aria-hidden="true" />
-          Collected {{ formatNaira(current?.collectedMinor ?? 0) }}
-        </span>
-        <span class="flex items-center gap-1.5 font-medium text-amber-700">
-          <span class="h-2 w-2 rounded-full bg-amber-500" aria-hidden="true" />
-          Pending {{ formatNaira(current?.pendingMinor ?? 0) }}
-        </span>
-      </div>
+      <p v-if="methodSplit.length === 0" class="m-0 text-sm text-slate-500">
+        No money taken {{ PERIOD_LABELS[period].toLowerCase() }} yet.
+      </p>
+      <template v-else>
+        <div
+          class="flex h-3 overflow-hidden rounded-full bg-slate-100"
+          role="img"
+          :aria-label="
+            methodSplit.map((m) => `${PAYMENT_METHOD_META[m.method].label} ${m.pct}%`).join(', ')
+          "
+        >
+          <div
+            v-for="m in methodSplit"
+            :key="m.method"
+            :class="METHOD_BAR[m.method]"
+            :style="{ width: `${m.pct}%` }"
+          />
+        </div>
+        <ul class="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-xs">
+          <li
+            v-for="m in methodSplit"
+            :key="m.method"
+            class="flex items-center gap-1.5 font-medium text-slate-700"
+          >
+            <AppIcon :name="PAYMENT_METHOD_META[m.method].icon" />
+            {{ PAYMENT_METHOD_META[m.method].label }} {{ formatNaira(m.amountMinor) }}
+          </li>
+        </ul>
+      </template>
     </div>
 
     <div class="rounded-xl border border-slate-200 bg-white p-4">
@@ -154,10 +192,13 @@ onUnmounted(() => window.clearInterval(timer))
         </span>
         <div>
           <p class="m-0 text-2xl font-bold text-slate-900">
-            {{ current?.awaitingCollectionCount ?? 0 }}
+            {{ outstanding?.awaitingCollectionCount ?? 0 }}
           </p>
           <p class="m-0 text-xs text-slate-500">
-            Ready and waiting for the customer to collect
+            Ready and waiting for the customer
+            <template v-if="outstanding?.awaitingCollectionBalanceMinor">
+              · {{ formatNaira(outstanding.awaitingCollectionBalanceMinor) }} to take at pickup
+            </template>
           </p>
         </div>
       </div>
@@ -175,12 +216,16 @@ onUnmounted(() => window.clearInterval(timer))
       >
         <div class="min-w-0">
           <p class="m-0 truncate text-sm font-semibold text-slate-900">{{ row.branchName }}</p>
-          <p class="m-0 text-xs text-slate-500">{{ plural(row.bookingCount, 'booking') }}</p>
+          <p class="m-0 text-xs text-slate-500">
+            {{ plural(row.bookingCount, 'booking') }} · billed {{ formatNaira(row.billedMinor) }}
+          </p>
         </div>
         <div class="shrink-0 text-right">
-          <p class="m-0 text-sm font-bold text-brand-700">{{ formatNaira(row.billedMinor) }}</p>
+          <p class="m-0 text-sm font-bold text-green-700">
+            {{ formatNaira(row.collectedMinor) }} received
+          </p>
           <p class="m-0 text-xs font-medium text-amber-700">
-            {{ formatNaira(row.pendingMinor) }} pending
+            {{ formatNaira(row.outstandingMinor) }} owed now
           </p>
         </div>
       </div>

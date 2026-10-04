@@ -1,6 +1,9 @@
 import { Schema, model, type InferSchemaType, type HydratedDocument } from 'mongoose'
 import {
   BOOKING_STATUSES,
+  LEDGER_KINDS,
+  LEDGER_METHODS,
+  PAYMENT_STAGES,
   PAYMENT_STATUSES,
   SERVICE_TIERS,
   paymentStatusFor,
@@ -33,6 +36,25 @@ const statusEventSchema = new Schema(
   { _id: false },
 )
 
+/**
+ * One movement of money: who took it, when, how, and how much. Append-only —
+ * nothing edits or deletes an entry; a mistake is corrected by a refund. It is
+ * embedded so a payment, the cached `paidMinor` and the status change land in
+ * one atomic document update, with no transaction required.
+ */
+const ledgerEntrySchema = new Schema({
+  kind: { type: String, enum: LEDGER_KINDS, required: true },
+  /** Always positive; `kind` says which way the money moved. */
+  amountMinor: { type: Number, required: true, min: 1 },
+  method: { type: String, enum: LEDGER_METHODS, required: true },
+  stage: { type: String, enum: PAYMENT_STAGES, required: true },
+  at: { type: Date, required: true },
+  byUserId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  note: { type: String },
+  /** Idempotency key for a retried payment request. */
+  clientRequestId: { type: String },
+})
+
 const bookingSchema = new Schema(
   {
     tenantId: { type: Schema.Types.ObjectId, ref: 'Tenant', required: true },
@@ -46,14 +68,19 @@ const bookingSchema = new Schema(
     subtotalMinor: { type: Number, required: true, min: 0 },
     discountMinor: { type: Number, default: 0, min: 0 },
     totalMinor: { type: Number, required: true, min: 0 },
+    /** Cached net of `payments` (payments minus refunds); never exceeds the total. */
     paidMinor: { type: Number, default: 0, min: 0 },
     paymentStatus: { type: String, enum: PAYMENT_STATUSES, default: 'unpaid', index: true },
 
     status: { type: String, enum: BOOKING_STATUSES, default: 'received', index: true },
     statusHistory: { type: [statusEventSchema], default: [] },
+    payments: { type: [ledgerEntrySchema], default: [] },
 
     expectedReadyAt: { type: Date },
+    /** When, and by whom, the laundry was handed over. Only ever set when fully paid. */
     collectedAt: { type: Date },
+    collectedByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
+    cancelledByUserId: { type: Schema.Types.ObjectId, ref: 'User' },
 
     /**
      * Idempotency key supplied by the client. Offline bookings are replayed on
@@ -83,6 +110,9 @@ bookingSchema.index({ tenantId: 1, createdAt: -1 })
 bookingSchema.index({ tenantId: 1, branchId: 1, createdAt: -1 })
 bookingSchema.index({ tenantId: 1, branchId: 1, status: 1, createdAt: -1 })
 bookingSchema.index({ tenantId: 1, customerId: 1, createdAt: -1 })
+/** Cash-basis revenue and the till report scan payments by date. */
+bookingSchema.index({ tenantId: 1, 'payments.at': -1 })
+bookingSchema.index({ tenantId: 1, collectedAt: -1 })
 
 bookingSchema.pre('validate', function (next) {
   const subtotal = this.items.reduce((sum, item) => sum + item.lineTotalMinor, 0)

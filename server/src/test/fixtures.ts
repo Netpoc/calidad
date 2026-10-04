@@ -58,8 +58,14 @@ async function shirtFor(api: Api, t: TenantFixture): Promise<string> {
   return created.body.item._id
 }
 
-/** A booking of one Shirt, so isolation tests have real data. */
-export async function makeBooking(api: Api, t: TenantFixture, phone = '08031234567') {
+/** A booking of one Shirt (₦500), so isolation tests have real data. */
+export async function makeBooking(
+  api: Api,
+  t: TenantFixture,
+  phone = '08031234567',
+  extra: Record<string, unknown> = {},
+  token = t.ownerToken,
+) {
   const itemId = await shirtFor(api, t)
   const booking = await api.post<{ booking: { _id: string; referenceCode: string } }>(
     '/bookings',
@@ -67,9 +73,27 @@ export async function makeBooking(api: Api, t: TenantFixture, phone = '080312345
       branchId: t.hqId,
       customer: { name: 'Customer', phone },
       items: [{ priceItemId: itemId, tier: 'wash_starch_iron', quantity: 1 }],
+      ...extra,
     },
-    t.ownerToken,
+    token,
   )
   if (booking.status !== 201) throw new Error(`booking failed: ${JSON.stringify(booking.body)}`)
   return { itemId, ...booking.body.booking }
+}
+
+/** A tenant user created through the API, as an owner would, then logged in. */
+export async function makeUser(
+  api: Api,
+  t: TenantFixture,
+  role: 'manager' | 'staff',
+  email: string,
+  branchIds = [t.hqId],
+): Promise<{ userId: string; token: string }> {
+  const res = await api.post<{ user: { _id?: string; id?: string } }>(
+    '/auth/users',
+    { name: `${role} ${email}`, email, password: PASSWORD, role, branchIds },
+    t.ownerToken,
+  )
+  if (res.status !== 201) throw new Error(`user failed: ${JSON.stringify(res.body)}`)
+  return { userId: String(res.body.user._id ?? res.body.user.id), token: await loginAs(api, email) }
 }

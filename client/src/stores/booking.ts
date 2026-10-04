@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { http, errorMessage } from '@/api/http'
-import type { Booking, ServiceTier } from '@/api/types'
+import type { Booking, PaymentMethod, ServiceTier } from '@/api/types'
 import { db } from '@/offline/db'
 import { usePricingStore } from './pricing'
 import { useConnectionStore } from './connection'
@@ -41,6 +41,8 @@ export const useBookingStore = defineStore('booking', () => {
   const customer = ref({ name: '', phone: '', email: '', address: '' })
   const discountMinor = ref(0)
   const paidMinor = ref(0)
+  /** Required by the server whenever anything is paid up front. */
+  const paymentMethod = ref<PaymentMethod | null>(null)
   const submitting = ref(false)
 
   const subtotalMinor = computed(() =>
@@ -49,6 +51,7 @@ export const useBookingStore = defineStore('booking', () => {
   const totalMinor = computed(() => Math.max(0, subtotalMinor.value - discountMinor.value))
   const balanceMinor = computed(() => Math.max(0, totalMinor.value - paidMinor.value))
   const isEmpty = computed(() => lines.value.length === 0)
+  const overpaid = computed(() => paidMinor.value > totalMinor.value)
 
   function addLine(priceItemId: string, tier: ServiceTier, quantity = 1): void {
     const price = pricing.priceFor(priceItemId, tier)
@@ -85,6 +88,7 @@ export const useBookingStore = defineStore('booking', () => {
     customer.value = { name: '', phone: '', email: '', address: '' }
     discountMinor.value = 0
     paidMinor.value = 0
+    paymentMethod.value = null
   }
 
   /**
@@ -96,6 +100,10 @@ export const useBookingStore = defineStore('booking', () => {
     if (isEmpty.value) throw new Error('Add at least one item')
     if (!customer.value.name.trim() || !customer.value.phone.trim()) {
       throw new Error("Enter the customer's name and phone number")
+    }
+    if (overpaid.value) throw new Error('Paid now cannot be more than the total')
+    if (paidMinor.value > 0 && !paymentMethod.value) {
+      throw new Error('Choose how the customer paid')
     }
     const tenantId = auth.user?.tenantId
     if (!tenantId) throw new Error('Sign in to a business to book laundry')
@@ -118,6 +126,10 @@ export const useBookingStore = defineStore('booking', () => {
       })),
       discountMinor: discountMinor.value,
       paidMinor: paidMinor.value,
+      ...(paidMinor.value > 0 && paymentMethod.value ? { paymentMethod: paymentMethod.value } : {}),
+      // When the money changed hands, so an offline deposit counts on the
+      // day it was taken, not the day the phone found a signal.
+      takenAt: new Date().toISOString(),
     }
 
     try {
@@ -169,11 +181,13 @@ export const useBookingStore = defineStore('booking', () => {
     customer,
     discountMinor,
     paidMinor,
+    paymentMethod,
     submitting,
     subtotalMinor,
     totalMinor,
     balanceMinor,
     isEmpty,
+    overpaid,
     addLine,
     removeLine,
     reset,

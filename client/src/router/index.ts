@@ -36,9 +36,20 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/modules/bookings/BookingListView.vue'),
       },
       {
+        path: 'bookings/:id',
+        name: 'booking-detail',
+        component: () => import('@/modules/bookings/BookingDetailView.vue'),
+      },
+      {
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('@/modules/dashboard/DashboardView.vue'),
+        meta: { minRole: 'manager' },
+      },
+      {
+        path: 'payments',
+        name: 'payments',
+        component: () => import('@/modules/payments/PaymentsView.vue'),
         meta: { minRole: 'manager' },
       },
       {

@@ -10,6 +10,7 @@ import StatusPill from '@/components/StatusPill.vue'
 import type { Booking, BookingStatus, Customer } from '@/api/types'
 import { formatNaira, plural } from '@/composables/useMoney'
 import type { QueuedBooking } from '@/offline/db'
+import PaymentModal from './PaymentModal.vue'
 import { foreignOutboxCount, ownOutbox } from '@/offline/session'
 import { useAuthStore } from '@/stores/auth'
 import { useConnectionStore } from '@/stores/connection'
@@ -24,11 +25,36 @@ const foreign = ref(0)
 const loading = ref(false)
 const filter = ref<BookingStatus | 'all'>('all')
 
-/** The next step a staff member can take, or null at the end of the flow. */
+/**
+ * The next lifecycle step a staff member can take. Handing over is not here:
+ * it goes through the payment dialog, because it needs a zero balance.
+ */
 const NEXT_STATUS: Partial<Record<BookingStatus, BookingStatus>> = {
   received: 'in_progress',
   in_progress: 'ready_for_collection',
-  ready_for_collection: 'collected',
+}
+
+function balanceOf(booking: Booking): number {
+  return Math.max(0, booking.totalMinor - booking.paidMinor)
+}
+
+/** Cancelled bookings are refunded; anything else short of its total still owes. */
+function owes(booking: Booking): boolean {
+  return booking.status !== 'cancelled' && balanceOf(booking) > 0
+}
+
+function isOpen(booking: Booking): boolean {
+  return booking.status !== 'collected' && booking.status !== 'cancelled'
+}
+
+const modal = ref<{ booking: Booking; mode: 'pay' | 'collect' } | null>(null)
+
+function onMoneyDone(updated: Booking, message: string) {
+  const target = modal.value?.booking
+  // The list was populated with customer/branch objects; keep them.
+  if (target) Object.assign(target, { ...updated, customerId: target.customerId, branchId: target.branchId })
+  modal.value = null
+  toast.success(message)
 }
 
 /** Only the states worth filtering by at a counter. */
@@ -169,7 +195,11 @@ onMounted(load)
       :key="booking._id"
       class="rounded-xl border border-slate-200 bg-white p-4"
     >
-      <div class="flex items-start justify-between gap-2">
+      <router-link
+        :to="{ name: 'booking-detail', params: { id: booking._id } }"
+        class="flex items-start justify-between gap-2 text-inherit no-underline"
+        :aria-label="`Open booking ${booking.referenceCode}`"
+      >
         <div class="min-w-0">
           <p class="m-0 font-mono text-base font-bold tracking-wide text-slate-900">
             {{ booking.referenceCode }}
@@ -185,22 +215,58 @@ onMounted(load)
           <p class="m-0 text-base font-bold text-slate-900">
             {{ formatNaira(booking.totalMinor) }}
           </p>
+          <p v-if="owes(booking)" class="m-0 text-xs font-semibold text-amber-700">
+            {{ formatNaira(balanceOf(booking)) }} owed
+          </p>
         </div>
-      </div>
+      </router-link>
 
       <div class="mt-2.5 flex flex-wrap items-center gap-2">
         <StatusPill :meta="BOOKING_STATUS_META[booking.status]" size="sm" />
         <StatusPill :meta="PAYMENT_STATUS_META[booking.paymentStatus]" size="sm" />
       </div>
 
-      <BaseButton
-        v-if="NEXT_STATUS[booking.status]"
-        block
-        class="mt-3"
-        @click="advance(booking)"
+      <div v-if="owes(booking) || isOpen(booking)" class="mt-3 flex gap-2">
+        <BaseButton
+          v-if="owes(booking)"
+          variant="secondary"
+          icon="banknotes"
+          class="flex-1"
+          :disabled="!connection.isOnline"
+          @click="modal = { booking, mode: 'pay' }"
+        >
+          Take payment
+        </BaseButton>
+        <BaseButton
+          v-if="booking.status === 'ready_for_collection'"
+          class="flex-1"
+          :disabled="!connection.isOnline"
+          @click="modal = { booking, mode: 'collect' }"
+        >
+          {{ BOOKING_STATUS_META.ready_for_collection.action }}
+        </BaseButton>
+        <BaseButton
+          v-else-if="NEXT_STATUS[booking.status]"
+          class="flex-1"
+          @click="advance(booking)"
+        >
+          {{ BOOKING_STATUS_META[booking.status].action }}
+        </BaseButton>
+      </div>
+      <p
+        v-if="(owes(booking) || isOpen(booking)) && !connection.isOnline"
+        class="m-0 mt-1 text-center text-xs text-slate-500"
       >
-        {{ BOOKING_STATUS_META[booking.status].action }}
-      </BaseButton>
+        Payments and handover need a connection
+      </p>
     </article>
+
+    <PaymentModal
+      :open="modal !== null"
+      :booking="modal?.booking ?? null"
+      :mode="modal?.mode ?? 'pay'"
+      @close="modal = null"
+      @done="onMoneyDone"
+    />
   </div>
 </template>

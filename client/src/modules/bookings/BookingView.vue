@@ -9,6 +9,7 @@ import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import MoneyInput from '@/components/ui/MoneyInput.vue'
+import PaymentMethodPicker from '@/components/PaymentMethodPicker.vue'
 import { useToast } from '@/composables/useToast'
 import { categoryMeta } from '@/api/display'
 import type { Branch, Customer, PriceItem, ServiceTier } from '@/api/types'
@@ -105,12 +106,17 @@ function changeQuantity(index: number, delta: number) {
   else line.quantity = next
 }
 
-const canSubmit = computed(
-  () =>
-    !booking.isEmpty &&
-    booking.customer.name.trim().length > 0 &&
-    booking.customer.phone.trim().length > 0,
-)
+/** Why the booking cannot be confirmed yet, or null when it can. */
+const blocker = computed(() => {
+  if (booking.isEmpty) return 'Add at least one item'
+  if (!booking.customer.name.trim() || !booking.customer.phone.trim()) {
+    return 'Add the customer’s name and phone number to continue'
+  }
+  if (booking.overpaid) return 'Paid now is more than the total'
+  if (booking.paidMinor > 0 && !booking.paymentMethod) return 'Choose how the customer paid'
+  return null
+})
+const canSubmit = computed(() => blocker.value === null)
 
 const confirmation = ref<{ title: string; body: string } | null>(null)
 
@@ -391,6 +397,10 @@ const branchOptions = computed(() =>
           <MoneyInput v-model="booking.discountMinor" label="Discount" />
           <MoneyInput v-model="booking.paidMinor" label="Paid now" />
         </div>
+        <p v-if="booking.overpaid" class="m-0 text-xs font-semibold text-red-700" role="alert">
+          Paid now cannot be more than the total of {{ formatNaira(booking.totalMinor) }}.
+        </p>
+        <PaymentMethodPicker v-if="booking.paidMinor > 0" v-model="booking.paymentMethod" />
         <div
           v-if="booking.balanceMinor > 0"
           class="flex justify-between rounded-lg bg-amber-50 px-2.5 py-2 font-semibold text-amber-800"
@@ -429,8 +439,8 @@ const branchOptions = computed(() =>
         {{ connection.isOnline ? 'Confirm booking' : 'Save offline' }}
       </BaseButton>
     </div>
-    <p v-if="!canSubmit" class="m-0 mt-1.5 text-center text-xs text-slate-500">
-      Add the customer’s name and phone number to continue
+    <p v-if="blocker" class="m-0 mt-1.5 text-center text-xs text-slate-500">
+      {{ blocker }}
     </p>
   </div>
 

@@ -1,8 +1,8 @@
-import { Router, type Request } from 'express'
+import { Router } from 'express'
 import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler.js'
-import { authenticate, readableBranchIds, requireRole } from '../../middleware/auth.js'
-import { requireTenant, tenantOf } from '../../middleware/tenant.js'
+import { authenticate, requireRole } from '../../middleware/auth.js'
+import { readScopeFor, requireTenant, tenantOf } from '../../middleware/tenant.js'
 import { HttpError } from '../../shared/http-error.js'
 import { byBranch, headline, timeSeries } from './dashboard.service.js'
 
@@ -10,27 +10,11 @@ const router = Router()
 /** Dashboards are for managers and owners (CLAUDE.md). */
 router.use(authenticate, requireTenant, requireRole('manager'))
 
-/**
- * Narrows the caller's authorized scope by an optional branchId filter. An
- * owner may look at any branch; a manager may only narrow within their own.
- */
-function scopeFor(req: Request): string[] | null {
-  const auth = req.auth!
-  const requested = typeof req.query.branchId === 'string' ? req.query.branchId : null
-  const scope = readableBranchIds(auth)
-
-  if (!requested) return scope
-  if (scope !== null && !scope.includes(requested)) {
-    throw new HttpError(403, 'Branch outside your assigned scope')
-  }
-  return [requested]
-}
-
 /** Day, month, and year to date — the three headline figures. */
 router.get(
   '/summary',
   asyncHandler(async (req, res) => {
-    res.json({ summary: await headline({ tenantId: tenantOf(req), branchIds: scopeFor(req) }) })
+    res.json({ summary: await headline({ tenantId: tenantOf(req), branchIds: readScopeFor(req) }) })
   }),
 )
 
@@ -47,7 +31,7 @@ router.get(
     if (from >= to) throw new HttpError(400, '`from` must be before `to`')
 
     res.json({
-      series: await timeSeries({ tenantId: tenantOf(req), branchIds: scopeFor(req), from, to, period }),
+      series: await timeSeries({ tenantId: tenantOf(req), branchIds: readScopeFor(req), from, to, period }),
     })
   }),
 )
@@ -56,7 +40,8 @@ router.get(
   '/branches',
   asyncHandler(async (req, res) => {
     const { from, to } = rangeSchema.omit({ period: true }).parse(req.query)
-    res.json({ branches: await byBranch({ tenantId: tenantOf(req), branchIds: scopeFor(req), from, to }) })
+    if (from >= to) throw new HttpError(400, '`from` must be before `to`')
+    res.json({ branches: await byBranch({ tenantId: tenantOf(req), branchIds: readScopeFor(req), from, to }) })
   }),
 )
 

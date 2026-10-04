@@ -33,9 +33,13 @@ describe('bookings never cross businesses', () => {
     const booking = await makeBooking(api, a)
 
     const status = await api.patch(`/bookings/${booking._id}/status`, { status: 'in_progress' }, b.ownerToken)
-    const payment = await api.post(`/bookings/${booking._id}/payments`, { amountMinor: 100 }, b.ownerToken)
+    const payment = await api.post(`/bookings/${booking._id}/payments`, { amountMinor: 100, method: 'cash' }, b.ownerToken)
+    const collect = await api.post(`/bookings/${booking._id}/collect`, { payment: { method: 'cash' } }, b.ownerToken)
+    const detail = await api.get(`/bookings/${booking._id}`, b.ownerToken)
     expect(status.status).toBe(404)
     expect(payment.status).toBe(404)
+    expect(collect.status).toBe(404)
+    expect(detail.status).toBe(404)
 
     // And the rightful owner still can.
     expect((await api.patch(`/bookings/${booking._id}/status`, { status: 'in_progress' }, a.ownerToken)).status).toBe(200)

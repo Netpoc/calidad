@@ -39,8 +39,9 @@ export const SERVICE_TIER_LABELS: Record<ServiceTier, string> = {
 
 /**
  * Laundry lifecycle. `ready_for_collection` is an SMS trigger (see CLAUDE.md);
- * `collected` means the customer has physically taken the laundry away, which
- * is independent of whether they have paid.
+ * `collected` means the customer has physically taken the laundry away. It can
+ * only be reached through the collect flow, which refuses while any balance is
+ * outstanding — so a collected booking is always fully paid.
  */
 export const BOOKING_STATUSES = [
   'received',
@@ -65,8 +66,9 @@ export function canTransition(from: BookingStatus, to: BookingStatus): boolean {
 }
 
 /**
- * Money is tracked in kobo (minor units) to keep arithmetic exact. Revenue
- * "collected" means cash received; "pending" means billed but not yet paid.
+ * Money is tracked in kobo (minor units) to keep arithmetic exact. Payment
+ * status is derived from the ledger total; it says nothing about whether the
+ * laundry has been handed over (that is `status: 'collected'`).
  */
 export const PAYMENT_STATUSES = ['unpaid', 'partial', 'paid'] as const
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number]
@@ -77,4 +79,49 @@ export function paymentStatusFor(totalMinor: number, paidMinor: number): Payment
   if (paidMinor >= totalMinor) return 'paid'
   if (paidMinor <= 0) return 'unpaid'
   return 'partial'
+}
+
+/**
+ * How money changed hands. `unrecorded` exists only for payments migrated from
+ * before the ledger; the API never accepts it as input.
+ */
+export const PAYMENT_METHODS = ['cash', 'transfer', 'pos'] as const
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
+export const LEDGER_METHODS = [...PAYMENT_METHODS, 'unrecorded'] as const
+export type LedgerMethod = (typeof LEDGER_METHODS)[number]
+
+/** A ledger entry either brings money in or gives it back. */
+export const LEDGER_KINDS = ['payment', 'refund'] as const
+export type LedgerKind = (typeof LEDGER_KINDS)[number]
+
+/**
+ * Set by the server, never the client: a payment that leaves a balance is a
+ * `deposit` (part-payment); one that clears it is the `balance`.
+ */
+export const PAYMENT_STAGES = ['deposit', 'balance', 'refund'] as const
+export type PaymentStage = (typeof PAYMENT_STAGES)[number]
+
+export function paymentStageFor(totalMinor: number, paidAfterMinor: number): PaymentStage {
+  return paidAfterMinor >= totalMinor ? 'balance' : 'deposit'
+}
+
+/**
+ * Business day boundaries. Every tenant is in Nigeria today; Lagos is a fixed
+ * UTC+1 with no daylight saving, so the arithmetic is exact. Deriving these
+ * from the server clock instead would put "today" at 01:00–01:00 on Render.
+ */
+export const BUSINESS_TIMEZONE = 'Africa/Lagos'
+const LAGOS_OFFSET_MS = 60 * 60 * 1000
+
+export function businessPeriodStarts(now: Date): { day: Date; month: Date; year: Date } {
+  const local = new Date(now.getTime() + LAGOS_OFFSET_MS)
+  const y = local.getUTCFullYear()
+  const m = local.getUTCMonth()
+  const d = local.getUTCDate()
+  const toUtc = (ms: number) => new Date(ms - LAGOS_OFFSET_MS)
+  return {
+    day: toUtc(Date.UTC(y, m, d)),
+    month: toUtc(Date.UTC(y, m, 1)),
+    year: toUtc(Date.UTC(y, 0, 1)),
+  }
 }

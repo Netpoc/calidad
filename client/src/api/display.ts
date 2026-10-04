@@ -1,5 +1,5 @@
 import type { IconName } from '@/components/ui/icons'
-import type { BookingStatus, PaymentStatus } from './types'
+import type { BookingStatus, LedgerMethod, PaymentStage, PaymentStatus, UserRef } from './types'
 
 /**
  * Presentation metadata for statuses.
@@ -64,6 +64,26 @@ export const PAYMENT_STATUS_META: Record<PaymentStatus, StatusMeta> = {
     icon: 'check-circle',
     classes: 'bg-green-50 text-green-700 border-green-200',
   },
+}
+
+/** Modes of payment: an icon and a word, so the till report reads at a glance. */
+export const PAYMENT_METHOD_META: Record<LedgerMethod, StatusMeta> = {
+  cash: { label: 'Cash', icon: 'banknotes', classes: 'bg-green-50 text-green-700 border-green-200' },
+  transfer: { label: 'Transfer', icon: 'arrows-right-left', classes: 'bg-blue-50 text-blue-700 border-blue-200' },
+  pos: { label: 'POS', icon: 'credit-card', classes: 'bg-violet-50 text-violet-700 border-violet-200' },
+  unrecorded: { label: 'Not recorded', icon: 'question', classes: 'bg-slate-100 text-slate-600 border-slate-200' },
+}
+
+export const PAYMENT_STAGE_LABELS: Record<PaymentStage, string> = {
+  deposit: 'Deposit',
+  balance: 'Balance',
+  refund: 'Refund',
+}
+
+/** The name behind a populated user reference, for audit lines. */
+export function userName(ref: UserRef | undefined): string {
+  if (!ref) return 'Unknown'
+  return typeof ref === 'string' ? 'A team member' : ref.name
 }
 
 /**

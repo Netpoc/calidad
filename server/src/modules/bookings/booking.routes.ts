@@ -8,13 +8,32 @@ import {
   type TenantPrincipal,
 } from '../../middleware/tenant.js'
 import { asyncHandler } from '../../middleware/async-handler.js'
-import { BOOKING_STATUSES, SERVICE_TIERS } from '../../shared/domain.js'
+import { BOOKING_STATUSES, PAYMENT_METHODS, SERVICE_TIERS } from '../../shared/domain.js'
 import { HttpError, param } from '../../shared/http-error.js'
 import { BookingModel } from './booking.model.js'
-import { createBooking, recordPayment, updateBookingStatus } from './booking.service.js'
+import {
+  collectBooking,
+  createBooking,
+  recordPayment,
+  updateBookingStatus,
+} from './booking.service.js'
 
 const router = Router()
 router.use(authenticate, requireTenant, requireRole('staff'))
+
+/** Who handled money is shown to owners, so populate names wherever a user id appears. */
+const AUDIT_USERS = [
+  'createdByUserId',
+  'collectedByUserId',
+  'cancelledByUserId',
+  'statusHistory.byUserId',
+  'payments.byUserId',
+].map((path) => ({ path, select: 'name role' }))
+
+const methodSchema = z.object({
+  method: z.enum(PAYMENT_METHODS),
+  note: z.string().trim().max(200).optional(),
+})
 
 const createSchema = z.object({
   branchId: z.string().optional(),
@@ -35,6 +54,8 @@ const createSchema = z.object({
     .min(1),
   discountMinor: z.number().int().min(0).optional(),
   paidMinor: z.number().int().min(0).optional(),
+  paymentMethod: z.enum(PAYMENT_METHODS).optional(),
+  takenAt: z.coerce.date().optional(),
   expectedReadyAt: z.coerce.date().optional(),
   clientRequestId: z.string().min(8).optional(),
 })
@@ -152,10 +173,27 @@ router.get(
   }),
 )
 
+/** One booking with its full audit trail: who took which money, how, and who handed it over. */
+router.get(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const bookingId = param(req, 'id')
+    await assertBookingInScope(bookingId, req.auth as TenantPrincipal)
+
+    const booking = await BookingModel.findOne({ _id: bookingId, tenantId: tenantOf(req) })
+      .populate('customerId', 'name phone customerId')
+      .populate('branchId', 'name')
+      .populate(AUDIT_USERS)
+    res.json({ booking })
+  }),
+)
+
 router.patch(
   '/:id/status',
   asyncHandler(async (req, res) => {
-    const { status } = z.object({ status: z.enum(BOOKING_STATUSES) }).parse(req.body)
+    const { status, refund } = z
+      .object({ status: z.enum(BOOKING_STATUSES), refund: methodSchema.optional() })
+      .parse(req.body)
     const bookingId = param(req, 'id')
     await assertBookingInScope(bookingId, req.auth as TenantPrincipal)
 
@@ -164,6 +202,8 @@ router.patch(
       bookingId,
       status,
       byUserId: req.auth!.userId,
+      actorRole: req.auth!.role,
+      refund,
     })
     res.json({ booking })
   }),
@@ -172,11 +212,39 @@ router.patch(
 router.post(
   '/:id/payments',
   asyncHandler(async (req, res) => {
-    const { amountMinor } = z.object({ amountMinor: z.number().int().min(1) }).parse(req.body)
+    const body = methodSchema
+      .extend({
+        amountMinor: z.number().int().min(1),
+        clientRequestId: z.string().min(8).optional(),
+      })
+      .parse(req.body)
     const bookingId = param(req, 'id')
     await assertBookingInScope(bookingId, req.auth as TenantPrincipal)
 
-    const booking = await recordPayment({ tenantId: tenantOf(req), bookingId, amountMinor })
+    const booking = await recordPayment({
+      ...body,
+      tenantId: tenantOf(req),
+      bookingId,
+      byUserId: req.auth!.userId,
+    })
+    res.json({ booking })
+  }),
+)
+
+/** Hand the laundry over, taking any outstanding balance in the same step. */
+router.post(
+  '/:id/collect',
+  asyncHandler(async (req, res) => {
+    const { payment } = z.object({ payment: methodSchema.optional() }).parse(req.body ?? {})
+    const bookingId = param(req, 'id')
+    await assertBookingInScope(bookingId, req.auth as TenantPrincipal)
+
+    const booking = await collectBooking({
+      tenantId: tenantOf(req),
+      bookingId,
+      byUserId: req.auth!.userId,
+      payment,
+    })
     res.json({ booking })
   }),
 )

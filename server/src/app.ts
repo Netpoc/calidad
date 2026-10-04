@@ -8,6 +8,7 @@ import bookingRoutes from './modules/bookings/booking.routes.js'
 import branchRoutes from './modules/branches/branch.routes.js'
 import customerRoutes from './modules/customers/customer.routes.js'
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js'
+import paymentRoutes from './modules/payments/payments.routes.js'
 import pricingRoutes from './modules/pricing/pricing.routes.js'
 import platformRoutes from './modules/tenants/platform.routes.js'
 
@@ -29,6 +30,7 @@ export function createApp() {
   app.use('/api/pricing', pricingRoutes)
   app.use('/api/bookings', bookingRoutes)
   app.use('/api/dashboard', dashboardRoutes)
+  app.use('/api/payments', paymentRoutes)
   app.use('/api/platform', platformRoutes)
 
   app.use(notFound)

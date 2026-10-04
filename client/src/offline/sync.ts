@@ -87,6 +87,8 @@ function toPayload(entry: QueuedBooking) {
     items: entry.items,
     discountMinor: entry.discountMinor,
     paidMinor: entry.paidMinor,
+    paymentMethod: entry.paymentMethod,
+    takenAt: entry.takenAt ?? new Date(entry.createdAt).toISOString(),
   }
 }
 
