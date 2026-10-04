@@ -103,6 +103,28 @@ export const router = createRouter({
   routes,
 })
 
+/**
+ * A new deploy's service worker takes over at once and deletes the previous
+ * version's files. A page still running the old version then fails to load
+ * any screen it had not opened yet — and offline there is no network to fall
+ * back to. A full load fetches the new version, which is fully precached, so
+ * it works offline too. Once per path, so a genuinely broken build cannot loop.
+ */
+router.onError((error, to) => {
+  const isChunkError = /dynamically imported module|Importing a module script failed|Failed to fetch/i.test(
+    String((error as Error)?.message ?? error),
+  )
+  if (!isChunkError) return
+  const key = `calidad.chunkReload:${to.fullPath}`
+  try {
+    if (sessionStorage.getItem(key)) return
+    sessionStorage.setItem(key, '1')
+  } catch {
+    // No session storage: reload anyway; a loop needs a broken deploy too.
+  }
+  window.location.assign(to.fullPath)
+})
+
 router.beforeEach((to) => {
   if (to.meta.public) return true
 

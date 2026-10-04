@@ -5,6 +5,7 @@ import { errorMessage } from '@/api/http'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import AlertBox from '@/components/ui/AlertBox.vue'
+import InstallBanner from '@/components/InstallBanner.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -55,6 +56,9 @@ async function submit() {
         <h1 class="m-0 text-2xl font-bold text-white">Calidad Laundry</h1>
         <p class="m-0 mt-1 text-sm text-brand-100">Book and manage laundry</p>
       </div>
+
+      <!-- Before sign-in too: setting up a new phone starts here. -->
+      <InstallBanner class="mb-4" />
 
       <form class="space-y-4 rounded-2xl bg-white p-6" novalidate @submit.prevent="submit">
         <BaseInput

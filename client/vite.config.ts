@@ -19,8 +19,11 @@ export default defineConfig(({ mode }) => {
       vue(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.svg'],
+        includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
         manifest: {
+          // A stable id, so a future start_url change does not make installed
+          // copies look like a different app.
+          id: '/',
           name: 'Calidad Laundry',
           short_name: 'Calidad',
           description: 'Laundry booking and branch management',

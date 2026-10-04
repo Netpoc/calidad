@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import type { IconName } from '@/components/ui/icons'
 import ConnectionBadge from '@/components/ConnectionBadge.vue'
+import InstallBanner from '@/components/InstallBanner.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -83,6 +84,7 @@ function logout() {
     </header>
 
     <main class="flex-1 pb-24">
+      <InstallBanner class="mx-3 mt-3 sm:mx-auto sm:max-w-2xl" />
       <router-view />
     </main>
 
