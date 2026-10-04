@@ -39,9 +39,9 @@ export function useToast() {
     toasts,
     dismiss,
     iconFor: (tone: ToastTone) => TONE_ICONS[tone],
-    success: (m: string) => push('success', m),
-    error: (m: string) => push('error', m, 6000),
-    info: (m: string) => push('info', m),
-    warning: (m: string) => push('warning', m, 5000),
+    success: (m: string, ms?: number) => push('success', m, ms),
+    error: (m: string, ms = 6000) => push('error', m, ms),
+    info: (m: string, ms?: number) => push('info', m, ms),
+    warning: (m: string, ms = 5000) => push('warning', m, ms),
   }
 }

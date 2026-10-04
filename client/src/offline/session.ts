@@ -2,6 +2,8 @@ import { db, getMeta, setMeta } from './db'
 
 const SESSION_TENANT_KEY = 'session.tenantId'
 export const PRICING_TENANT_KEY = 'pricing.tenantId'
+/** The business's branches, kept so a booking taken offline still names one. */
+export const BRANCHES_KEY = 'branches'
 
 /** Service-worker runtime caches that hold business data (see vite.config.ts). */
 const TENANT_SW_CACHES = ['pricing', 'reference-data']
@@ -15,7 +17,7 @@ const TENANT_SW_CACHES = ['pricing', 'reference-data']
  */
 export async function clearTenantCaches(): Promise<void> {
   await db.priceItems.clear()
-  await db.meta.bulkDelete(['pricing.fetchedAt', PRICING_TENANT_KEY])
+  await db.meta.bulkDelete(['pricing.fetchedAt', PRICING_TENANT_KEY, BRANCHES_KEY])
 
   if (typeof caches === 'undefined') return
   for (const key of await caches.keys()) {

@@ -1,4 +1,4 @@
-import { http } from '@/api/http'
+import { errorMessage, http } from '@/api/http'
 import { db, type QueuedBooking } from './db'
 import { ownOutbox } from './session'
 
@@ -11,6 +11,27 @@ export interface SyncResult {
   error?: string
 }
 
+/**
+ * What a flush did. `results` is empty unless the server answered; `state`
+ * says why, so a tap on "Sync now" never looks like a dead button.
+ */
+export interface SyncOutcome {
+  state: 'synced' | 'nothing' | 'busy' | 'offline' | 'unreachable'
+  results: SyncResult[]
+  /** Set when `state` is `unreachable`. */
+  error?: string
+}
+
+/** Automatic retries before a rejected booking waits for a person to tap "Sync now". */
+export const AUTO_RETRY_LIMIT = 3
+
+/**
+ * Long enough for Render's free tier to wake (20–50 s) and then create a batch
+ * of bookings. The 15 s default made the first sync after a quiet spell time
+ * out on the wake-up alone.
+ */
+const SYNC_TIMEOUT_MS = 90_000
+
 let running = false
 
 /**
@@ -18,34 +39,60 @@ let running = false
  *
  * Entries keep their clientRequestId across retries, so the server recognises a
  * replay and returns the original booking instead of creating a second one —
- * which is also what prevents a duplicate "your laundry is ready" SMS.
+ * which is also what prevents a duplicate "your laundry is booked" SMS. That
+ * guarantee is what makes every retry below safe.
  *
  * A `failed` entry is one the server rejected on its merits (an unknown price
- * item, a tier that is not offered); retrying it unchanged will never succeed,
- * so it is kept for a human to resolve rather than retried forever.
+ * item, a tier that is not offered). Background flushes give up on it after
+ * AUTO_RETRY_LIMIT tries; a manual flush always tries again, because the person
+ * tapping "Sync now" may have just fixed the cause (re-added the price, say).
  */
-export async function flushOutbox(tenantId: string | null): Promise<SyncResult[]> {
+export async function flushOutbox(
+  tenantId: string | null,
+  { manual = false }: { manual?: boolean } = {},
+): Promise<SyncOutcome> {
   // Only this business's entries. A booking queued under another business
   // waits on this device until that business signs in again — sending it now
   // would file it under the wrong business.
-  if (running || !navigator.onLine || !tenantId) return []
+  if (!tenantId) return { state: 'nothing', results: [] }
+  if (running) return { state: 'busy', results: [] }
+  if (!navigator.onLine) return { state: 'offline', results: [] }
   running = true
 
   try {
-    const pending = await ownOutbox(tenantId)
-      .and((entry) => entry.status === 'queued' || entry.status === 'failed')
-      .toArray()
-    if (pending.length === 0) return []
-
-    // Only retry `failed` entries that have not exhausted their attempts.
-    const batch = pending.filter((entry) => entry.status === 'queued' || entry.attempts < 3)
-    if (batch.length === 0) return []
+    // `syncing` is included on purpose: an entry is left in that state when
+    // the app is closed or the phone sleeps mid-request, and nothing else
+    // would ever reset it. `running` means no flush in this tab owns it now.
+    const pending = await ownOutbox(tenantId).toArray()
+    const batch = pending.filter(
+      (entry) => entry.status !== 'failed' || manual || entry.attempts < AUTO_RETRY_LIMIT,
+    )
+    if (batch.length === 0) return { state: 'nothing', results: [] }
 
     await db.outbox.bulkPut(batch.map((entry) => ({ ...entry, status: 'syncing' as const })))
 
-    const { data } = await http.post<{ results: SyncResult[] }>('/bookings/sync', {
-      bookings: batch.map(toPayload),
-    })
+    let data: { results: SyncResult[] }
+    try {
+      ;({ data } = await http.post<{ results: SyncResult[] }>(
+        '/bookings/sync',
+        { bookings: batch.map(toPayload) },
+        { timeout: SYNC_TIMEOUT_MS },
+      ))
+    } catch (error) {
+      // Never reached the server, or the request as a whole was refused.
+      // Restore each entry as it was — a `failed` one stays failed, with its
+      // attempt count — so nothing is lost and the next try picks them up.
+      // A partial server-side success is safe to replay (idempotency key).
+      const message = errorMessage(error)
+      await db.outbox.bulkPut(
+        batch.map((entry) => ({
+          ...entry,
+          status: entry.status === 'failed' ? ('failed' as const) : ('queued' as const),
+          lastError: message,
+        })),
+      )
+      return { state: 'unreachable', results: [], error: message }
+    }
 
     for (const result of data.results) {
       if (result.status === 'created' || result.status === 'duplicate') {
@@ -60,20 +107,7 @@ export async function flushOutbox(tenantId: string | null): Promise<SyncResult[]
       }
     }
 
-    return data.results
-  } catch (error) {
-    // Network failure mid-flush: put everything back so the next attempt picks
-    // it up. Nothing is lost, and the idempotency key makes a partial server
-    // -side success safe to replay.
-    const stuck = await db.outbox.where('status').equals('syncing').toArray()
-    await db.outbox.bulkPut(
-      stuck.map((entry) => ({
-        ...entry,
-        status: 'queued' as const,
-        lastError: error instanceof Error ? error.message : 'Network error',
-      })),
-    )
-    return []
+    return { state: 'synced', results: data.results }
   } finally {
     running = false
   }
@@ -93,31 +127,26 @@ function toPayload(entry: QueuedBooking) {
 }
 
 /**
- * Flush when the browser regains connectivity, and once on startup. The
- * tenant is read at each run, not captured, because the signed-in business
- * can change without a page reload.
+ * Flush when the browser regains connectivity, and on a timer while there is
+ * work queued. The tenant is read at each run, not captured, because the
+ * signed-in business can change without a page reload.
  */
 export function startSyncWatcher(
   currentTenant: () => string | null,
-  onFlush?: (results: SyncResult[]) => void,
+  flush: () => Promise<unknown>,
 ): () => void {
-  const run = async () => {
-    const results = await flushOutbox(currentTenant())
-    if (results.length && onFlush) onFlush(results)
-  }
-
-  window.addEventListener('online', run)
+  window.addEventListener('online', flush)
   // The `online` event is optimistic — it fires when the OS sees an interface,
   // not when the API is reachable — so also poll while there is work queued.
   const timer = window.setInterval(async () => {
     const tenantId = currentTenant()
-    if (navigator.onLine && tenantId && (await ownOutbox(tenantId).count()) > 0) await run()
+    if (navigator.onLine && tenantId && (await ownOutbox(tenantId).count()) > 0) await flush()
   }, 30_000)
 
-  void run()
+  void flush()
 
   return () => {
-    window.removeEventListener('online', run)
+    window.removeEventListener('online', flush)
     window.clearInterval(timer)
   }
 }

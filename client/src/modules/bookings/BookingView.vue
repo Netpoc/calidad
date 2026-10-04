@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { http } from '@/api/http'
+import { BRANCHES_KEY } from '@/offline/session'
+import { getMeta, setMeta } from '@/offline/db'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import AlertBox from '@/components/ui/AlertBox.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -53,10 +55,15 @@ onMounted(async () => {
   try {
     const { data } = await http.get<{ branches: Branch[] }>('/branches')
     branches.value = data.branches
-    branchId.value = data.branches[0]?._id ?? ''
+    await setMeta(BRANCHES_KEY, data.branches)
   } catch {
-    // Offline: reference data comes from the service worker cache.
+    // Offline. The service worker's cache only helps if this exact URL was
+    // fetched before; the copy kept on the device always does. Without it an
+    // owner's offline booking was queued with no branch, and the server
+    // rejected it on every sync.
+    branches.value = (await getMeta<Branch[]>(BRANCHES_KEY)) ?? []
   }
+  branchId.value = branches.value[0]?._id ?? ''
   await pricing.initialize(branchId.value || undefined)
   // Arrived from a customer's history with the ticket prefilled.
   if (booking.customer.phone.trim() && connection.isOnline) void lookupCustomer()
@@ -108,6 +115,10 @@ function changeQuantity(index: number, delta: number) {
 /** Why the booking cannot be confirmed yet, or null when it can. */
 const blocker = computed(() => {
   if (booking.isEmpty) return 'Add at least one item'
+  // The server infers the branch only for someone assigned exactly one.
+  if (!branchId.value && (auth.isOwner || (auth.user?.branchIds.length ?? 0) > 1)) {
+    return 'Branch list not loaded — connect once, then you can book offline'
+  }
   if (!booking.customer.name.trim() || !booking.customer.phone.trim()) {
     return 'Add the customer’s name and phone number to continue'
   }

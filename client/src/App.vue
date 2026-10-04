@@ -16,22 +16,11 @@ let stopSyncing: (() => void) | undefined
 onMounted(() => {
   auth.restore()
   stopWatching = connection.watch()
+  // Every sync — timer, reconnect, sign-in, or a tap — goes through the
+  // connection store, which reports the outcome in one place.
   stopSyncing = startSyncWatcher(
     () => auth.user?.tenantId ?? null,
-    (results) => {
-    const created = results.filter((r) => r.status === 'created')
-    const failed = results.filter((r) => r.status === 'failed')
-    if (created.length) {
-      toast.success(
-        `${created.length} offline booking${created.length > 1 ? 's' : ''} synced — ` +
-          `${created.map((r) => r.referenceCode).join(', ')}`,
-      )
-    }
-    if (failed.length) {
-      toast.error(`${failed.length} booking(s) could not sync. Open Bookings to review.`)
-    }
-      void connection.refreshQueueCount()
-    },
+    () => connection.sync(),
   )
 })
 

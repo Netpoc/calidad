@@ -39,7 +39,7 @@ const state = computed<{ label: string; icon: IconName; classes: string }>(() =>
     class="flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-full border-0 px-3 text-xs font-semibold"
     :class="state.classes"
     :aria-label="`Connection: ${state.label}. Tap to sync now.`"
-    @click="connection.sync()"
+    @click="connection.sync({ manual: true })"
   >
     <AppIcon :name="state.icon" :class="connection.syncing && 'animate-spin'" />
     {{ state.label }}

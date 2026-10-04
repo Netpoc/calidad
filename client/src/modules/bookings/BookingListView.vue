@@ -109,7 +109,7 @@ async function advance(booking: Booking) {
 }
 
 async function retrySync() {
-  await connection.sync()
+  await connection.sync({ manual: true })
   await load()
 }
 

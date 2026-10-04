@@ -2,7 +2,9 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { http } from '@/api/http'
 import { ownOutbox } from '@/offline/session'
-import { flushOutbox, type SyncResult } from '@/offline/sync'
+import { flushOutbox, type SyncOutcome } from '@/offline/sync'
+import { useToast } from '@/composables/useToast'
+import { plural } from '@/composables/useMoney'
 import { useAuthStore } from './auth'
 
 /**
@@ -12,6 +14,7 @@ import { useAuthStore } from './auth'
  */
 export const useConnectionStore = defineStore('connection', () => {
   const auth = useAuthStore()
+  const toast = useToast()
   const browserOnline = ref(navigator.onLine)
   const apiReachable = ref(navigator.onLine)
   const queuedCount = ref(0)
@@ -29,13 +32,13 @@ export const useConnectionStore = defineStore('connection', () => {
     queuedCount.value = await ownOutbox(auth.user?.tenantId ?? null).count()
   }
 
-  async function probe(): Promise<boolean> {
+  async function probe(timeout = 4000): Promise<boolean> {
     if (!navigator.onLine) {
       apiReachable.value = false
       return false
     }
     try {
-      await http.get('/health', { timeout: 4000 })
+      await http.get('/health', { timeout })
       apiReachable.value = true
     } catch {
       apiReachable.value = false
@@ -67,23 +70,81 @@ export const useConnectionStore = defineStore('connection', () => {
     }
   }
 
-  async function sync(): Promise<SyncResult[]> {
-    if (!(await probe())) return []
+  /**
+   * Sends this business's queued bookings and says what happened.
+   *
+   * A tap on "Sync now" (`manual`) is patient: it waits up to a minute for a
+   * sleeping server rather than giving up after the 4 s probe — which is what
+   * made the button look dead right after reconnecting — and it retries
+   * bookings the background sync has given up on. Background runs stay quick
+   * and quiet unless something actually synced or failed.
+   */
+  async function sync({ manual = false }: { manual?: boolean } = {}): Promise<SyncOutcome> {
+    if (syncing.value) {
+      if (manual) toast.info('Already syncing…')
+      return { state: 'busy', results: [] }
+    }
     syncing.value = true
     try {
-      const results = await flushOutbox(auth.user?.tenantId ?? null)
-      lastSyncAt.value = new Date()
+      let outcome: SyncOutcome
+      if (!navigator.onLine) {
+        outcome = { state: 'offline', results: [] }
+      } else if (!(await probe(manual ? 60_000 : 4000))) {
+        outcome = { state: 'unreachable', results: [], error: 'Server not responding' }
+      } else {
+        outcome = await flushOutbox(auth.user?.tenantId ?? null, { manual })
+      }
+
+      if (outcome.state === 'synced') {
+        apiReachable.value = true
+        lastSyncAt.value = new Date()
+      } else if (outcome.state === 'unreachable') {
+        apiReachable.value = false
+      }
       await refreshQueueCount()
-      return results
+      report(outcome, manual)
+      return outcome
     } finally {
       syncing.value = false
     }
   }
 
+  function report(outcome: SyncOutcome, manual: boolean): void {
+    const sent = outcome.results.filter((r) => r.status !== 'failed')
+    const failed = outcome.results.filter((r) => r.status === 'failed')
+    if (sent.length) {
+      toast.success(
+        `${plural(sent.length, 'offline booking')} synced — ` +
+          sent.map((r) => r.referenceCode).join(', '),
+        6000,
+      )
+    }
+    if (failed.length) {
+      toast.error(
+        `${plural(failed.length, 'booking')} could not sync: ${failed[0]!.error ?? 'rejected'}. ` +
+          'Open Bookings to review.',
+        8000,
+      )
+    }
+    if (!manual) return
+    if (outcome.state === 'nothing') toast.info('Nothing waiting to sync')
+    if (outcome.state === 'busy') toast.info('Already syncing…')
+    if (outcome.state === 'offline') {
+      toast.warning('No internet on this device — bookings stay saved here')
+    }
+    if (outcome.state === 'unreachable') {
+      toast.warning(
+        `Could not reach the server (${outcome.error}). Bookings stay saved here — try again shortly.`,
+        8000,
+      )
+    }
+  }
+
   function watch(): () => void {
+    // Syncing on `online` is startSyncWatcher's job (App.vue); doing it here
+    // too raced it and reported "busy".
     const onOnline = () => {
       browserOnline.value = true
-      void sync()
       void warmUp()
     }
     const onOffline = () => {
