@@ -10,6 +10,7 @@ import PaymentMethodPicker from '@/components/PaymentMethodPicker.vue'
 import type { Booking, PaymentMethod } from '@/api/types'
 import { formatNaira } from '@/composables/useMoney'
 import { useConnectionStore } from '@/stores/connection'
+import { uuid } from '@/offline/uuid'
 
 /**
  * Every way money moves on an existing booking, in one dialog:
@@ -69,7 +70,7 @@ watch(
     method.value = null
     note.value = ''
     error.value = ''
-    requestId = crypto.randomUUID()
+    requestId = uuid()
   },
 )
 

@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { http, errorMessage } from '@/api/http'
 import type { Booking, PaymentMethod, ServiceTier } from '@/api/types'
 import { db } from '@/offline/db'
+import { uuid } from '@/offline/uuid'
 import { usePricingStore } from './pricing'
 import { useConnectionStore } from './connection'
 import { useAuthStore } from './auth'
@@ -26,10 +27,6 @@ export interface SubmitOutcome {
  *  code. Prefixed so it can never be mistaken for a server reference. */
 function provisionalReference(): string {
   return `TMP-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
-}
-
-function newRequestId(): string {
-  return crypto.randomUUID()
 }
 
 export const useBookingStore = defineStore('booking', () => {
@@ -108,8 +105,9 @@ export const useBookingStore = defineStore('booking', () => {
     const tenantId = auth.user?.tenantId
     if (!tenantId) throw new Error('Sign in to a business to book laundry')
 
-    submitting.value = true
-    const clientRequestId = newRequestId()
+    // Built before `submitting` flips: anything thrown here must not leave the
+    // confirm button spinning forever.
+    const clientRequestId = uuid()
     const payload = {
       clientRequestId,
       branchId,
@@ -132,6 +130,7 @@ export const useBookingStore = defineStore('booking', () => {
       takenAt: new Date().toISOString(),
     }
 
+    submitting.value = true
     try {
       if (!connection.isOnline) throw new Error('offline')
 
