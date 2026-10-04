@@ -183,7 +183,13 @@ onMounted(load)
             <h1 class="m-0 font-mono text-xl font-bold tracking-wide text-slate-900">
               {{ booking.referenceCode }}
             </h1>
-            <p class="m-0 truncate text-sm font-medium text-slate-700">{{ customer?.name }}</p>
+            <router-link
+              v-if="customer"
+              :to="{ name: 'customer-detail', params: { id: customer._id } }"
+              class="m-0 block truncate text-sm font-medium text-brand-700"
+            >
+              {{ customer.name }}
+            </router-link>
             <p class="m-0 text-xs text-slate-500">
               {{ customer?.phone }}<template v-if="branch"> · {{ branch.name }}</template>
             </p>

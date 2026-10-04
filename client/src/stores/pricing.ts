@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { http } from '@/api/http'
-import type { PriceItem, ServiceTier } from '@/api/types'
+import { SERVICE_TIERS, TIER_PRICE_FIELD, type PriceItem, type ServiceTier } from '@/api/types'
 import { db, getMeta, setMeta } from '@/offline/db'
 import { PRICING_TENANT_KEY } from '@/offline/session'
 import { useAuthStore } from './auth'
@@ -26,11 +26,10 @@ export const usePricingStore = defineStore('pricing', () => {
   /** Only the tiers an item actually offers — a null price is "not offered". */
   function tiersFor(item: PriceItem): Array<{ tier: ServiceTier; priceMinor: number }> {
     const tiers: Array<{ tier: ServiceTier; priceMinor: number }> = []
-    if (item.washStarchIronMinor != null) {
-      tiers.push({ tier: 'wash_starch_iron', priceMinor: item.washStarchIronMinor })
-    }
-    if (item.starchIronMinor != null) {
-      tiers.push({ tier: 'starch_iron', priceMinor: item.starchIronMinor })
+    for (const tier of SERVICE_TIERS) {
+      // `undefined` too: items cached before a tier existed lack the field.
+      const priceMinor = item[TIER_PRICE_FIELD[tier]]
+      if (priceMinor != null) tiers.push({ tier, priceMinor })
     }
     return tiers
   }
@@ -38,7 +37,7 @@ export const usePricingStore = defineStore('pricing', () => {
   function priceFor(itemId: string, tier: ServiceTier): number | null {
     const item = byId.value.get(itemId)
     if (!item) return null
-    return tier === 'wash_starch_iron' ? item.washStarchIronMinor : item.starchIronMinor
+    return item[TIER_PRICE_FIELD[tier]] ?? null
   }
 
   async function loadFromCache(): Promise<void> {

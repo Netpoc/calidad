@@ -12,6 +12,8 @@ import {
 } from '../notifications/sms.service.js'
 import {
   ROLE_RANK,
+  SERVICE_TIER_LABELS,
+  TIER_PRICE_FIELD,
   canTransition,
   paymentStageFor,
   paymentStatusFor,
@@ -189,15 +191,12 @@ async function priceItems(inputs: BookingItemInput[], tenantId: string, branchId
       throw new HttpError(400, `Unknown or inactive price item: ${input.priceItemId}`)
     }
 
-    const unitPriceMinor =
-      input.tier === 'wash_starch_iron'
-        ? priceItem.washStarchIronMinor
-        : priceItem.starchIronMinor
+    const unitPriceMinor = priceItem[TIER_PRICE_FIELD[input.tier]]
 
     if (unitPriceMinor == null) {
       throw new HttpError(
         400,
-        `"${priceItem.name}" is not offered as ${input.tier.replace(/_/g, ' ')}`,
+        `"${priceItem.name}" is not offered as ${SERVICE_TIER_LABELS[input.tier]}`,
       )
     }
 

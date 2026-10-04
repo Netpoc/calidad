@@ -18,6 +18,7 @@ import { UserModel, hashPassword } from '../modules/auth/user.model.js'
 import { BranchModel } from '../modules/branches/branch.model.js'
 import { PriceItemModel } from '../modules/pricing/price-item.model.js'
 import { TenantModel } from '../modules/tenants/tenant.model.js'
+import { offersAnyTier } from '../shared/domain.js'
 import { createTenantWithOwner } from '../modules/tenants/tenant.service.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -27,6 +28,7 @@ interface CsvRow {
   name: string
   washStarchIronMinor: number | null
   starchIronMinor: number | null
+  ironOnlyMinor: number | null
 }
 
 /**
@@ -59,6 +61,7 @@ function parseCsv(text: string): CsvRow[] {
       name: (cells[1] ?? '').trim(),
       washStarchIronMinor: toMinor(cells[2]),
       starchIronMinor: toMinor(cells[3]),
+      ironOnlyMinor: toMinor(cells[4]),
     }
   })
 }
@@ -149,8 +152,8 @@ export async function seedDemoTenant(params: {
   const rows = parseCsv(readFileSync(CSV_PATH, 'utf8')).filter((row) => row.name)
   let seeded = 0
   for (const [index, row] of rows.entries()) {
-    if (row.washStarchIronMinor == null && row.starchIronMinor == null) {
-      console.warn(`Skipping "${row.name}" — no price in either tier`)
+    if (!offersAnyTier(row)) {
+      console.warn(`Skipping "${row.name}" — no price in any tier`)
       continue
     }
     await PriceItemModel.findOneAndUpdate(
@@ -162,6 +165,7 @@ export async function seedDemoTenant(params: {
         category: categoryFor(row.name),
         washStarchIronMinor: row.washStarchIronMinor,
         starchIronMinor: row.starchIronMinor,
+        ironOnlyMinor: row.ironOnlyMinor,
         sortOrder: index,
         active: true,
       },

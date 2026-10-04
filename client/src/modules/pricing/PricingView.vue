@@ -9,8 +9,13 @@ import BaseSelect from '@/components/ui/BaseSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import MoneyInput from '@/components/ui/MoneyInput.vue'
 import { useToast } from '@/composables/useToast'
-import { CATEGORY_META, categoryMeta } from '@/api/display'
-import type { PriceItem } from '@/api/types'
+import { CATEGORY_META, SERVICE_TIER_SHORT, categoryMeta } from '@/api/display'
+import {
+  SERVICE_TIERS,
+  TIER_PRICE_FIELD,
+  type PriceItem,
+  type ServiceTier,
+} from '@/api/types'
 import { formatNaira } from '@/composables/useMoney'
 import { usePricingStore } from '@/stores/pricing'
 
@@ -18,10 +23,30 @@ const toast = useToast()
 const pricing = usePricingStore()
 const editing = ref<string | null>(null)
 const search = ref('')
-const draft = ref<{ washStarchIron: number | null; starchIron: number | null }>({
-  washStarchIron: null,
-  starchIron: null,
-})
+/** One price per tier; `null` is "not offered", never free. */
+type TierPrices = Record<ServiceTier, number | null>
+
+function emptyPrices(): TierPrices {
+  return { wash_starch_iron: null, starch_iron: null, iron_only: null }
+}
+
+function offersAny(prices: TierPrices): boolean {
+  return SERVICE_TIERS.some((tier) => prices[tier] != null)
+}
+
+/** The API's field names, e.g. `{ washStarchIronMinor: 50000, ironOnlyMinor: null }`. */
+function toPayload(prices: TierPrices) {
+  return Object.fromEntries(SERVICE_TIERS.map((tier) => [TIER_PRICE_FIELD[tier], prices[tier]]))
+}
+
+/** Chip colour per tier, paired with the tier name so colour is never the only cue. */
+const TIER_CHIP: Record<ServiceTier, string> = {
+  wash_starch_iron: 'bg-brand-50 text-brand-800',
+  starch_iron: 'bg-blue-50 text-blue-800',
+  iron_only: 'bg-violet-50 text-violet-800',
+}
+
+const draft = ref<TierPrices>(emptyPrices())
 const saving = ref(false)
 
 /**
@@ -30,12 +55,11 @@ const saving = ref(false)
  */
 const showAdd = ref(false)
 const adding = ref(false)
-const newItem = ref<{
-  name: string
-  category: string
-  washStarchIron: number | null
-  starchIron: number | null
-}>({ name: '', category: 'tops', washStarchIron: null, starchIron: null })
+const newItem = ref<{ name: string; category: string; prices: TierPrices }>({
+  name: '',
+  category: 'tops',
+  prices: emptyPrices(),
+})
 const addError = ref('')
 
 const categoryOptions = Object.entries(CATEGORY_META)
@@ -48,7 +72,7 @@ async function addItem() {
     addError.value = 'Give the item a name'
     return
   }
-  if (newItem.value.washStarchIron == null && newItem.value.starchIron == null) {
+  if (!offersAny(newItem.value.prices)) {
     addError.value = 'Enter a price for at least one service'
     return
   }
@@ -57,12 +81,11 @@ async function addItem() {
     await http.post('/pricing', {
       name: newItem.value.name.trim(),
       category: newItem.value.category,
-      washStarchIronMinor: newItem.value.washStarchIron,
-      starchIronMinor: newItem.value.starchIron,
+      ...toPayload(newItem.value.prices),
     })
     await pricing.refresh()
     toast.success(`${newItem.value.name.trim()} added`)
-    newItem.value = { name: '', category: newItem.value.category, washStarchIron: null, starchIron: null }
+    newItem.value = { name: '', category: newItem.value.category, prices: emptyPrices() }
     showAdd.value = false
   } catch (e) {
     addError.value = errorMessage(e)
@@ -86,10 +109,10 @@ const grouped = computed(() => {
 
 function startEdit(item: PriceItem) {
   editing.value = item._id
-  draft.value = {
-    washStarchIron: item.washStarchIronMinor,
-    starchIron: item.starchIronMinor,
-  }
+  // `?? null`: items cached before Iron Only existed have no field at all.
+  draft.value = Object.fromEntries(
+    SERVICE_TIERS.map((tier) => [tier, item[TIER_PRICE_FIELD[tier]] ?? null]),
+  ) as TierPrices
 }
 
 /**
@@ -97,16 +120,13 @@ function startEdit(item: PriceItem) {
  * than setting it to zero, which would make it free.
  */
 async function save(item: PriceItem) {
-  if (draft.value.washStarchIron == null && draft.value.starchIron == null) {
+  if (!offersAny(draft.value)) {
     toast.error('An item must offer at least one service')
     return
   }
   saving.value = true
   try {
-    await http.patch(`/pricing/${item._id}`, {
-      washStarchIronMinor: draft.value.washStarchIron,
-      starchIronMinor: draft.value.starchIron,
-    })
+    await http.patch(`/pricing/${item._id}`, toPayload(draft.value))
     await pricing.refresh()
     editing.value = null
     toast.success(`${item.name} updated`)
@@ -132,14 +152,10 @@ onMounted(() => pricing.refresh())
       <BaseInput v-model="newItem.name" label="Item name" placeholder="Shirt" />
       <BaseSelect v-model="newItem.category" label="Category" :options="categoryOptions" />
       <MoneyInput
-        v-model="newItem.washStarchIron"
-        label="Wash + Iron"
-        placeholder="Not offered"
-        allow-empty
-      />
-      <MoneyInput
-        v-model="newItem.starchIron"
-        label="Iron only"
+        v-for="tier in SERVICE_TIERS"
+        :key="tier"
+        v-model="newItem.prices[tier]"
+        :label="SERVICE_TIER_SHORT[tier]"
         placeholder="Not offered"
         allow-empty
       />
@@ -204,14 +220,10 @@ onMounted(() => pricing.refresh())
 
         <div v-if="editing === item._id" class="mt-3 space-y-3">
           <MoneyInput
-            v-model="draft.washStarchIron"
-            label="Wash + Iron"
-            placeholder="Not offered"
-            allow-empty
-          />
-          <MoneyInput
-            v-model="draft.starchIron"
-            label="Iron only"
+            v-for="tier in SERVICE_TIERS"
+            :key="tier"
+            v-model="draft[tier]"
+            :label="SERVICE_TIER_SHORT[tier]"
             placeholder="Not offered"
             allow-empty
           />
@@ -222,24 +234,18 @@ onMounted(() => pricing.refresh())
         </div>
 
         <div v-else class="mt-2 flex flex-wrap gap-2">
-          <span
-            v-if="item.washStarchIronMinor != null"
-            class="rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-800"
-          >
-            Wash + Iron {{ formatNaira(item.washStarchIronMinor) }}
-          </span>
-          <span
-            v-if="item.starchIronMinor != null"
-            class="rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800"
-          >
-            Iron only {{ formatNaira(item.starchIronMinor) }}
-          </span>
-          <span
-            v-if="item.starchIronMinor == null"
-            class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs text-slate-600"
-          >
-            Iron only — not offered
-          </span>
+          <template v-for="tier in SERVICE_TIERS" :key="tier">
+            <span
+              v-if="item[TIER_PRICE_FIELD[tier]] != null"
+              class="rounded-lg px-2.5 py-1 text-xs font-semibold"
+              :class="TIER_CHIP[tier]"
+            >
+              {{ SERVICE_TIER_SHORT[tier] }} {{ formatNaira(item[TIER_PRICE_FIELD[tier]]!) }}
+            </span>
+            <span v-else class="rounded-lg bg-slate-100 px-2.5 py-1 text-xs text-slate-600">
+              {{ SERVICE_TIER_SHORT[tier] }} — not offered
+            </span>
+          </template>
         </div>
       </div>
     </section>

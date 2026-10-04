@@ -11,7 +11,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import MoneyInput from '@/components/ui/MoneyInput.vue'
 import PaymentMethodPicker from '@/components/PaymentMethodPicker.vue'
 import { useToast } from '@/composables/useToast'
-import { categoryMeta } from '@/api/display'
+import { SERVICE_TIER_SHORT, categoryMeta } from '@/api/display'
 import type { Branch, Customer, PriceItem, ServiceTier } from '@/api/types'
 import { formatNaira, plural } from '@/composables/useMoney'
 import { useAuthStore } from '@/stores/auth'
@@ -31,12 +31,6 @@ const search = ref('')
 const activeCategory = ref<string>('all')
 const lookupLoading = ref(false)
 const matchedCustomer = ref<Customer | null>(null)
-
-/** Tier labels are shortened on the buttons — the full name never fits a phone. */
-const TIER_SHORT: Record<ServiceTier, string> = {
-  wash_starch_iron: 'Wash + Iron',
-  starch_iron: 'Iron only',
-}
 
 const categories = computed(() => {
   const present = new Set(pricing.sorted.map((item) => item.category || 'general'))
@@ -64,6 +58,8 @@ onMounted(async () => {
     // Offline: reference data comes from the service worker cache.
   }
   await pricing.initialize(branchId.value || undefined)
+  // Arrived from a customer's history with the ticket prefilled.
+  if (booking.customer.phone.trim() && connection.isOnline) void lookupCustomer()
 })
 
 async function lookupCustomer() {
@@ -71,10 +67,13 @@ async function lookupCustomer() {
   if (!phone) return
   lookupLoading.value = true
   try {
-    const { data } = await http.get<{ customers: Customer[] }>('/customers/search', {
-      params: { q: phone },
-    })
-    const found = data.customers[0]
+    const { data } = await http.get<{ customers: Customer[]; exactPhone: boolean }>(
+      '/customers/search',
+      { params: { q: phone } },
+    )
+    // Only the exact number fills the ticket — search also matches part of a
+    // number, and a half-typed phone must not pull in someone else's name.
+    const found = data.exactPhone ? data.customers[0] : undefined
     if (found) {
       matchedCustomer.value = found
       booking.customer.name = found.name
@@ -189,6 +188,12 @@ const branchOptions = computed(() =>
       >
         <AppIcon name="check-circle" />
         Returning customer · {{ matchedCustomer.customerId }}
+        <router-link
+          :to="{ name: 'customer-detail', params: { id: matchedCustomer._id } }"
+          class="ml-auto inline-flex min-h-tap items-center font-semibold text-brand-700"
+        >
+          View history
+        </router-link>
       </p>
       <p
         v-else-if="booking.customer.phone.trim() && !lookupLoading"
@@ -298,16 +303,18 @@ const branchOptions = computed(() =>
           </div>
           <!-- Only the tiers this item offers. A missing price means the
                service is not available, so no button is drawn for it. -->
-          <div class="flex flex-wrap gap-2">
+          <!-- Up to three tiers share one row: equal widths (basis-0) and tight
+               padding keep "Starch + Iron" on one line at 390px. -->
+          <div class="flex gap-2">
             <button
               v-for="tier in pricing.tiersFor(item)"
               :key="tier.tier"
               type="button"
-              class="tap-card min-h-tap flex-1 cursor-pointer rounded-lg border-2 border-brand-100 bg-brand-50 px-3 py-2 text-left"
+              class="tap-card min-h-tap min-w-0 flex-1 basis-0 cursor-pointer rounded-lg border-2 border-brand-100 bg-brand-50 px-2 py-2 text-left"
               @click="addItem(item, tier.tier)"
             >
-              <span class="block text-xs font-medium text-brand-700">
-                {{ TIER_SHORT[tier.tier] }}
+              <span class="block whitespace-nowrap text-xs font-medium text-brand-700">
+                {{ SERVICE_TIER_SHORT[tier.tier] }}
               </span>
               <span class="block text-sm font-bold text-brand-800">
                 {{ formatNaira(tier.priceMinor) }}
@@ -345,7 +352,7 @@ const branchOptions = computed(() =>
                 {{ line.name }}
               </p>
               <p class="m-0 text-xs text-slate-500">
-                {{ TIER_SHORT[line.tier] }} · {{ formatNaira(line.unitPriceMinor) }} each
+                {{ SERVICE_TIER_SHORT[line.tier] }} · {{ formatNaira(line.unitPriceMinor) }} each
               </p>
             </div>
             <button

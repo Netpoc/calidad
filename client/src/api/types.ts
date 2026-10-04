@@ -10,7 +10,7 @@ export const ROLE_RANK: Record<Role, number> = {
   staff: 1,
   customer: 0,
 }
-export type ServiceTier = 'wash_starch_iron' | 'starch_iron'
+export type ServiceTier = 'wash_starch_iron' | 'starch_iron' | 'iron_only'
 export type BookingStatus =
   | 'received'
   | 'in_progress'
@@ -27,10 +27,21 @@ export type LedgerKind = 'payment' | 'refund'
 /** Set by the server: `deposit` leaves a balance, `balance` clears it. */
 export type PaymentStage = 'deposit' | 'balance' | 'refund'
 
+/** Display order everywhere a tier is listed. Keys are stored — never rename them. */
+export const SERVICE_TIERS: readonly ServiceTier[] = ['wash_starch_iron', 'starch_iron', 'iron_only']
+
 export const SERVICE_TIER_LABELS: Record<ServiceTier, string> = {
-  wash_starch_iron: 'Wash, Starch & Iron',
-  starch_iron: 'Starch & Iron',
+  wash_starch_iron: 'Wash + Iron',
+  starch_iron: 'Starch + Iron',
+  iron_only: 'Iron Only',
 }
+
+/** Where each tier's price lives on a price item. */
+export const TIER_PRICE_FIELD = {
+  wash_starch_iron: 'washStarchIronMinor',
+  starch_iron: 'starchIronMinor',
+  iron_only: 'ironOnlyMinor',
+} as const satisfies Record<ServiceTier, keyof PriceItem>
 
 export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   received: 'Received',
@@ -74,6 +85,7 @@ export interface PriceItem {
   /** `null` means the tier is not offered — never treat it as free. */
   washStarchIronMinor: number | null
   starchIronMinor: number | null
+  ironOnlyMinor: number | null
   sortOrder: number
 }
 
@@ -85,6 +97,17 @@ export interface Customer {
   email?: string
   address?: string
 }
+
+/** Counts only bookings in branches the viewer may read. */
+export interface CustomerStats {
+  bookingCount: number
+  lastBookingAt: string | null
+  /** Non-cancelled booking totals. */
+  billedMinor: number
+  outstandingMinor: number
+}
+
+export type CustomerWithStats = Customer & { createdAt?: string; stats: CustomerStats }
 
 export interface BookingItem {
   priceItemId: string

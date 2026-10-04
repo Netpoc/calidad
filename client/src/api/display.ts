@@ -1,5 +1,19 @@
 import type { IconName } from '@/components/ui/icons'
-import type { BookingStatus, LedgerMethod, PaymentStage, PaymentStatus, UserRef } from './types'
+import type {
+  BookingStatus,
+  LedgerMethod,
+  PaymentStage,
+  PaymentStatus,
+  ServiceTier,
+  UserRef,
+} from './types'
+
+/** Tier names on buttons and chips — short enough for three across a phone. */
+export const SERVICE_TIER_SHORT: Record<ServiceTier, string> = {
+  wash_starch_iron: 'Wash + Iron',
+  starch_iron: 'Starch + Iron',
+  iron_only: 'Iron Only',
+}
 
 /**
  * Presentation metadata for statuses.

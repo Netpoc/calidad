@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler.js'
 import { authenticate, requireRole } from '../../middleware/auth.js'
 import { assertBranchesInTenant, requireTenant, tenantOf } from '../../middleware/tenant.js'
+import { offersAnyTier } from '../../shared/domain.js'
 import { HttpError, param } from '../../shared/http-error.js'
 import { PriceItemModel } from './price-item.model.js'
 
@@ -43,6 +44,7 @@ const priceSchema = z.object({
   category: z.string().optional(),
   washStarchIronMinor: z.number().int().min(0).nullable().optional(),
   starchIronMinor: z.number().int().min(0).nullable().optional(),
+  ironOnlyMinor: z.number().int().min(0).nullable().optional(),
   branchId: z.string().nullable().optional(),
   sortOrder: z.number().int().optional(),
 })
@@ -53,7 +55,7 @@ router.post(
   requireRole('owner'),
   asyncHandler(async (req, res) => {
     const body = priceSchema.parse(req.body)
-    if (body.washStarchIronMinor == null && body.starchIronMinor == null) {
+    if (!offersAnyTier(body)) {
       throw new HttpError(400, 'A price item must offer at least one service tier')
     }
     const tenantId = tenantOf(req)
@@ -72,7 +74,12 @@ router.patch(
     if (!item) throw new HttpError(404, 'Price item not found')
 
     item.set(body)
-    await item.save() // pre-validate enforces the at-least-one-tier rule
+    // The model's pre-validate hook enforces this too, but its plain Error
+    // surfaces as a 500 — this is the owner's mistake, so say so with a 400.
+    if (!offersAnyTier(item)) {
+      throw new HttpError(400, 'A price item must offer at least one service tier')
+    }
+    await item.save()
     res.json({ item })
   }),
 )

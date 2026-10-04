@@ -59,6 +59,17 @@ function logout() {
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <ConnectionBadge />
+          <!-- In the header, not the bottom nav: managers already fill all five
+               tabs, and every role needs to look a customer up. -->
+          <router-link
+            v-if="!auth.isPlatformAdmin"
+            :to="{ name: 'customers' }"
+            class="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-lg text-white no-underline hover:bg-white/15"
+            :class="route.path.startsWith('/customers') && 'bg-white/20'"
+            aria-label="Search customers"
+          >
+            <AppIcon name="search" />
+          </router-link>
           <button
             type="button"
             class="flex min-h-[44px] min-w-[44px] cursor-pointer items-center justify-center rounded-xl border-0 bg-transparent text-lg text-white hover:bg-white/15"

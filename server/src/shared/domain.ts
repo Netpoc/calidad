@@ -25,16 +25,32 @@ export const ROLE_RANK: Record<Role, number> = {
 }
 
 /**
- * The two service tiers in the price list. An item may legitimately offer only
- * the first (bedding, towels, curtains, "Bulk" have no starch-and-iron price),
- * so a missing tier means "not offered", never zero.
+ * The service tiers in the price list. An item may offer any subset (bedding,
+ * towels, curtains, "Bulk" are wash-only), so a missing tier means "not
+ * offered", never zero. The keys are stored on every booking line — rename the
+ * labels freely, never the keys.
  */
-export const SERVICE_TIERS = ['wash_starch_iron', 'starch_iron'] as const
+export const SERVICE_TIERS = ['wash_starch_iron', 'starch_iron', 'iron_only'] as const
 export type ServiceTier = (typeof SERVICE_TIERS)[number]
 
 export const SERVICE_TIER_LABELS: Record<ServiceTier, string> = {
-  wash_starch_iron: 'Washing, Starching & Ironing',
-  starch_iron: 'Starching & Ironing',
+  wash_starch_iron: 'Wash + Iron',
+  starch_iron: 'Starch + Iron',
+  iron_only: 'Iron Only',
+}
+
+/** Where each tier's price lives on a price item. */
+export const TIER_PRICE_FIELD = {
+  wash_starch_iron: 'washStarchIronMinor',
+  starch_iron: 'starchIronMinor',
+  iron_only: 'ironOnlyMinor',
+} as const satisfies Record<ServiceTier, string>
+export type TierPriceField = (typeof TIER_PRICE_FIELD)[ServiceTier]
+export const TIER_PRICE_FIELDS = Object.values(TIER_PRICE_FIELD)
+
+/** At least one tier must carry a price, or the item cannot be booked at all. */
+export function offersAnyTier(item: Partial<Record<TierPriceField, number | null | undefined>>): boolean {
+  return TIER_PRICE_FIELDS.some((field) => item[field] != null)
 }
 
 /**
